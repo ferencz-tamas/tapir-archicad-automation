@@ -95,6 +95,12 @@ static GSErrCode MenuCommandHandler (const API_MenuParams* menuParams)
                     {
                         if (!VersionChecker::IsUsingLatestVersion ()) {
                             TapirPalette::Instance ().UpdateAddOn ();
+                        } else if (VersionChecker::IsNewerVersionWithoutAddOn ()) {
+                            DGAlert (DG_INFORMATION, "Tapir Update",
+                                GS::UniString::Printf ("Tapir %T is available, but not yet for Archicad %d.",
+                                    VersionChecker::LatestVersion ().ToPrintf (), static_cast<int> (VersionChecker::ArchicadMainVersion ())),
+                                GS::UniString::Printf ("You are using Tapir %s.", ADDON_VERSION),
+                                "OK");
                         } else {
                             DGAlert (DG_INFORMATION,
                                 RSGetIndString (ID_AUTOUPDATE_STRINGS, ID_AUTOUPDATE_LATESTVERSION_ALERT_TITLE, ACAPI_GetOwnResModule ()),
@@ -194,7 +200,7 @@ GSErrCode Initialize (void)
         );
         err |= RegisterCommand<ChangeWindowCommand> (
             applicationCommands, "1.3.1",
-            "Changes the current (active) window to the given window."
+            "Changes the current (active) window to the given window. With windowType 'FloorPlan' and a storyIndex it also activates that story on the floor plan."
         );
         err |= RegisterCommand<GetUserGSIDCommand> (
             applicationCommands, "1.5.6",
@@ -784,7 +790,7 @@ GSErrCode Initialize (void)
         );
         err |= RegisterCommand<CreateMEPSystemsCommand> (
             attributeCommands, "1.5.4",
-            "Creates or overwrites MEP System attributes based on the given parameters."
+            "Creates or overwrites MEP System attributes (domain, pens, fill, center line type, surface and insulation surface) based on the given parameters."
         );
         err |= RegisterCommand<CreatePenTablesCommand> (
             attributeCommands, "1.5.4",
@@ -828,7 +834,7 @@ GSErrCode Initialize (void)
         );
         err |= RegisterCommand<GetMEPSystemsCommand> (
             attributeCommands, "1.5.4",
-            "Returns the details of the given MEP System attributes."
+            "Returns the details of the given MEP System attributes (domain, pens, fill, center line type, surface and insulation surface)."
         );
         err |= RegisterCommand<GetPenTablesCommand> (
             attributeCommands, "1.5.4",
@@ -882,6 +888,10 @@ GSErrCode Initialize (void)
         err |= RegisterCommand<GetIFCPropertiesOfElementsCommand> (
             ifcCommands, "1.5.1",
             "Retrieves the IFC properties of the given elements."
+        );
+        err |= RegisterCommand<SetIFCPropertiesOfElementsCommand> (
+            ifcCommands, "1.7.0",
+            "Sets local IFC properties on elements by creating or modifying single value (IfcPropertySingleValue) properties in the given property sets. Available only in Archicad 25, 26 and 27 for now."
         );
         AddCommandGroup (ifcCommands);
     }
@@ -1228,7 +1238,7 @@ GSErrCode Initialize (void)
         );
         err |= RegisterCommand<GetMEPRoutingElementsCommand> (
             mepCommands, "1.5.6",
-            "Retrieves the details of the given MEP routing elements: domain, MEP system, route polyline, segments with cross section data and nodes. Available from Archicad 28."
+            "Retrieves the details of the given MEP routing elements: domain, MEP system, route polyline, segments with cross section data (shape, size, preference table and reference id) and nodes. Available from Archicad 28."
         );
         err |= RegisterCommand<GetMEPPortsCommand> (
             mepCommands, "1.5.6",
@@ -1240,7 +1250,7 @@ GSErrCode Initialize (void)
         );
         err |= RegisterCommand<CreateMEPRoutingElementsCommand> (
             mepCommands, "1.5.6",
-            "Creates MEP routing elements (duct, pipe or cable carrier routes) along the given polylines with optional cross section data and MEP system. Available from Archicad 28."
+            "Creates MEP routing elements (duct, pipe or cable carrier routes) along the given polylines with optional cross section data (shape, size, preference table and reference id) and MEP system. Available from Archicad 28."
         );
         err |= RegisterCommand<CreateMEPElementsCommand> (
             mepCommands, "1.5.6",
@@ -1248,7 +1258,7 @@ GSErrCode Initialize (void)
         );
         err |= RegisterCommand<ModifyMEPRoutingElementsCommand> (
             mepCommands, "1.5.6",
-            "Modifies the given MEP routing elements: MEP system, cross section data of all segments and node positions. Available from Archicad 28."
+            "Modifies the given MEP routing elements: MEP system, cross section data (shape, size, preference table and reference id) of all segments and node positions. Available from Archicad 28."
         );
         err |= RegisterCommand<ConnectMEPElementsCommand> (
             mepCommands, "1.5.6",
