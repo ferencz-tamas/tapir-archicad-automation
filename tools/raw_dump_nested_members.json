@@ -1,0 +1,85 @@
+{
+ "API_DimensionID": [
+  "arcBase",
+  "arcBase.base",
+  "defNote",
+  "defNote.arrowData",
+  "markerData"
+ ],
+ "API_LevelDimensionID": [
+  "note1",
+  "note1.arrowData",
+  "note2"
+ ],
+ "API_RadialDimensionID": [
+  "base",
+  "base.base",
+  "markerData",
+  "note",
+  "note.arrowData"
+ ],
+ "API_AngleDimensionID": [
+  "markerData",
+  "note",
+  "note.arrowData"
+ ],
+ "API_TextID": [
+  "textFrame"
+ ],
+ "API_LabelID": [],
+ "API_LineID": [
+  "arrowData"
+ ],
+ "API_ArcID": [
+  "arrowData",
+  "linePen"
+ ],
+ "API_CircleID": [
+  "arrowData",
+  "linePen"
+ ],
+ "API_PolyLineID": [
+  "arrowData",
+  "poly"
+ ],
+ "API_SplineID": [
+  "arrowData",
+  "linePen"
+ ],
+ "API_PictureID": [],
+ "API_DrawingID": [
+  "API_DrawingLinkInfo",
+  "linkInfo",
+  "title"
+ ],
+ "API_HatchID": [
+  "contPen",
+  "fillPen",
+  "hatchOrientation",
+  "note",
+  "poly"
+ ],
+ "API_HotspotID": [
+  "hotspot"
+ ],
+ "API_CutPlaneID": [
+  "linkData",
+  "segment"
+ ],
+ "API_ElevationID": [
+  "linkData",
+  "segment"
+ ],
+ "API_InteriorElevationID": [],
+ "API_DetailID": [
+  "linkData"
+ ],
+ "API_WorksheetID": [
+  "linkData"
+ ],
+ "API_CameraID": [
+  "perspCam",
+  "perspCam.persp",
+  "perspCam.persp.sunAngSets"
+ ]
+}

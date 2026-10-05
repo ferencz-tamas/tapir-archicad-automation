@@ -21,6 +21,7 @@
 #include "ScriptUICommands.hpp"
 #include "ProjectCommands.hpp"
 #include "ElementCommands.hpp"
+#include "RawElementDump.hpp"
 #include "ElementGDLParameterCommands.hpp"
 #include "ElementCreationCommands.hpp"
 #include "ExtendedElementCommands.hpp"
@@ -1307,6 +1308,10 @@ GSErrCode Initialize (void)
         err |= RegisterCommand<GenerateDocumentationCommand> (
             developerCommands, "1.0.7",
             "Generates files for the documentation. Used by Tapir developers only."
+        );
+        err |= RegisterCommand<DumpRawElementFieldsCommand> (
+            developerCommands, "1.7.1",
+            "Dumps every member of the raw Archicad API struct (e.g. API_WallType) of an element by its native name. Used by Tapir developers only."
         );
         AddCommandGroup (developerCommands);
     }
