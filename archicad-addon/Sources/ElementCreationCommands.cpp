@@ -154,6 +154,22 @@ GS::ObjectState	CreateElementsCommandBase::Execute (const GS::ObjectState& param
                 continue;
             }
 
+            // Per-item "id" support: the Element ID is written right after the creation, in
+            // the same undoable command, so the create call itself stays as it was. Without
+            // an id the element keeps the next automatic ID of its tool. An id that cannot be
+            // written leaves no half-done element behind: the new element is deleted again
+            // and the item answers with the error, so the response never names an element
+            // whose id is not the requested one.
+            GS::UniString id;
+            if (data.Get ("id", id)) {
+                err = ChangeElementId (element.header.guid, id);
+                if (err != NoError) {
+                    ACAPI_Element_Delete ({ element.header.guid });
+                    elements (CreateErrorResponse (err, "Failed to set the id of the new " + elemTypeName + ", so it was not created"));
+                    continue;
+                }
+            }
+
             notification = {};
             notification.notifID = APINotifyElement_New;
             notification.elemHead = element.header;
@@ -203,6 +219,10 @@ GS::Optional<GS::UniString> CreateColumnsCommand::GetInputParametersSchema () co
                         "favoriteName": {
                             "type": "string",
                             "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                         },
                         "coordinates": {
                             "type": "object",
@@ -396,6 +416,10 @@ GS::Optional<GS::UniString> CreateSlabsCommand::GetInputParametersSchema () cons
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "level": {
                         "type": "number",
@@ -700,6 +724,10 @@ GS::Optional<GS::UniString> CreateZonesCommand::GetInputParametersSchema () cons
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
                     },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
+                    },
                     "floorIndex": {
                         "type": "number",
                         "description" : "Optional story index of the new zone. An automatic zone (geometry.referencePosition) is found around its reference point on this story, which is made active in the floor plan while the zone is created; the previously active story is restored afterwards."
@@ -908,6 +936,10 @@ GS::Optional<GS::UniString> CreatePolylinesCommand::GetInputParametersSchema () 
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
                     },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
+                    },
                     "floorInd": {
                         "type": "number",
                         "description" : "The identifier of the floor. Optional parameter, by default the current floor is used."	
@@ -1049,6 +1081,10 @@ GS::Optional<GS::UniString> CreateLineElementsCommand::GetInputParametersSchema 
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
                     },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
+                    },
                     "floorInd": {
                         "type": "number",
                         "description": "The identifier of the floor. Optional parameter, by default the current floor is used."
@@ -1121,6 +1157,10 @@ GS::Optional<GS::UniString> CreateArcsCommand::GetInputParametersSchema () const
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "floorInd": {
                         "type": "number",
@@ -1207,6 +1247,10 @@ GS::Optional<GS::UniString> CreateCirclesCommand::GetInputParametersSchema () co
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
                     },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
+                    },
                     "floorInd": {
                         "type": "number",
                         "description": "The identifier of the floor. Optional parameter, by default the current floor is used."
@@ -1279,6 +1323,10 @@ GS::Optional<GS::UniString> CreateHotspotsCommand::GetInputParametersSchema () c
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "floorInd": {
                         "type": "number",
@@ -1356,6 +1404,10 @@ GS::Optional<GS::UniString> CreateHatchesCommand::GetInputParametersSchema () co
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "floorInd": {
                         "type": "number",
@@ -1492,13 +1544,22 @@ GS::Optional<GS::ObjectState> CreateHatchesCommand::SetTypeSpecificParameters (A
     if (GetColor (parameters, "backgroundColor", element.hatch.backgroundRGB)) {
         element.hatch.hatchFlags |= APIHatch_HasBkgRGBColor;
     }
+    // The hatch type decides which of fillInd and buildingMaterial Archicad uses, so a given
+    // attribute alone also switches the type; when both are given the default type is kept,
+    // as SetDetailsOfElements does.
     const GS::ObjectState* fillId = parameters.Get ("fillId");
+    const GS::ObjectState* buildingMaterialId = parameters.Get ("buildingMaterialId");
     if (fillId != nullptr) {
         element.hatch.fillInd = GetAttributeIndexFromGuid (API_FilltypeID, GetGuidFromObjectState (*fillId));
+        if (buildingMaterialId == nullptr) {
+            element.hatch.hatchType = API_FillHatch;
+        }
     }
-    const GS::ObjectState* buildingMaterialId = parameters.Get ("buildingMaterialId");
     if (buildingMaterialId != nullptr) {
         element.hatch.buildingMaterial = GetAttributeIndexFromGuid (API_BuildingMaterialID, GetGuidFromObjectState (*buildingMaterialId));
+        if (fillId == nullptr) {
+            element.hatch.hatchType = API_BuildingMaterialHatch;
+        }
     }
     Int32 roomSpecial = 0;
     if (parameters.Get ("roomSpecial", roomSpecial)) {
@@ -1529,6 +1590,10 @@ GS::Optional<GS::UniString> CreateSplinesCommand::GetInputParametersSchema () co
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "floorInd": {
                         "type": "number",
@@ -1686,6 +1751,10 @@ static GS::UniString BuildLibraryPartBasedSchema (const char* arrayFieldName,
                         "favoriteName": {
                             "type": "string",
                             "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                         }
                     },
                     "additionalProperties": false,
@@ -2341,6 +2410,15 @@ GS::ObjectState ModifyTextsCommand::Execute (const GS::ObjectState& parameters, 
     const Stories stories = GetStories ();
 
     ACAPI_CallUndoableCommand ("ModifyTexts", [&] () -> GSErrCode {
+        // Same autotext flag handling as CreateTexts (CreateElementsCommandBase::Execute): with the
+        // flag on, a content starting with a Project Info autotext key followed by a line break
+        // failed to change or lost its later lines, while CreateTexts wrote it correctly (#1096).
+        bool savedAutoTextFlag;
+        ACAPI_AutoText_GetAutoTextFlag (&savedAutoTextFlag);
+        bool setAutoTextFlag = false;
+        ACAPI_AutoText_ChangeAutoTextFlag (&setAutoTextFlag);
+        const GS::OnExit autoTextGuard ([&savedAutoTextFlag] () { ACAPI_AutoText_ChangeAutoTextFlag (&savedAutoTextFlag); });
+
         for (const GS::ObjectState& item : itemsWithDetails) {
             const GS::ObjectState* elementId = item.Get ("elementId");
             if (elementId == nullptr) {
@@ -2511,6 +2589,13 @@ GS::ObjectState ModifyLabelsCommand::Execute (const GS::ObjectState& parameters,
     const auto& executionResults = response.AddList<GS::ObjectState> ("executionResults");
 
     ACAPI_CallUndoableCommand ("ModifyLabels", [&] () -> GSErrCode {
+        // Same autotext flag handling as CreateLabels, see ModifyTexts.
+        bool savedAutoTextFlag;
+        ACAPI_AutoText_GetAutoTextFlag (&savedAutoTextFlag);
+        bool setAutoTextFlag = false;
+        ACAPI_AutoText_ChangeAutoTextFlag (&setAutoTextFlag);
+        const GS::OnExit autoTextGuard ([&savedAutoTextFlag] () { ACAPI_AutoText_ChangeAutoTextFlag (&savedAutoTextFlag); });
+
         for (const GS::ObjectState& item : itemsWithDetails) {
             const GS::ObjectState* elementId = item.Get ("elementId");
             if (elementId == nullptr) {
@@ -2627,6 +2712,133 @@ GS::ObjectState ModifyLabelsCommand::Execute (const GS::ObjectState& parameters,
     return response;
 }
 
+ChangeTextContentCommand::ChangeTextContentCommand () :
+    CommandBase (CommonSchema::Used)
+{
+}
+
+GS::String ChangeTextContentCommand::GetName () const
+{
+    return "ChangeTextContent";
+}
+
+GS::Optional<GS::UniString> ChangeTextContentCommand::GetInputParametersSchema () const
+{
+    return R"({
+        "type": "object",
+        "properties": {
+            "contentChanges": {
+                "type": "array",
+                "description": "The content changes, applied in order (several changes of one element see the content as the previous one left it). Unlike ModifyTexts/ModifyLabels, the rest of the content is not rebuilt: the other runs, their styles and any autotext in them stay as they are, and the inserted piece takes the style of the character at 'from'.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "elementId": {
+                            "$ref": "#/ElementId",
+                            "description": "A Text element or a Label of the Text class."
+                        },
+                        "from": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "The position in the content where the replaced range starts."
+                        },
+                        "range": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "The number of characters to replace; 0 inserts the content at 'from'. The range may not reach over a line end into another paragraph."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The new content of the range; an empty string deletes the range. It must not contain line ends."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["elementId", "from", "range", "content"]
+                }
+            }
+        },
+        "additionalProperties": false,
+        "required": ["contentChanges"]
+    })";
+}
+
+GS::Optional<GS::UniString> ChangeTextContentCommand::GetRawResponseSchema () const
+{
+    return R"({
+        "type": "object",
+        "properties": {
+            "executionResults": { "$ref": "#/ExecutionResults" }
+        },
+        "additionalProperties": false,
+        "required": ["executionResults"]
+    })";
+}
+
+GS::ObjectState ChangeTextContentCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
+{
+    GS::Array<GS::ObjectState> contentChanges;
+    parameters.Get ("contentChanges", contentChanges);
+
+    GS::ObjectState response;
+    const auto& executionResults = response.AddList<GS::ObjectState> ("executionResults");
+
+    // ACAPI_Element_ChangeContent modifies the database, so it runs in an undo scope.
+    ACAPI_CallUndoableCommand ("ChangeTextContent", [&] () -> GSErrCode {
+        for (const GS::ObjectState& change : contentChanges) {
+            const GS::ObjectState* elementId = change.Get ("elementId");
+            if (elementId == nullptr) {
+                executionResults (CreateFailedExecutionResult (APIERR_BADPARS, "elementId is missing"));
+                continue;
+            }
+
+            API_Element element = {};
+            element.header.guid = GetGuidFromObjectState (*elementId);
+            GSErrCode err = ACAPI_Element_Get (&element);
+            if (err != NoError) {
+                executionResults (CreateFailedExecutionResult (err, "Failed to find the element"));
+                continue;
+            }
+            const API_ElemTypeID typeId = GetElemTypeId (element.header);
+            if (typeId != API_TextID && !(typeId == API_LabelID && element.label.labelClass == APILblClass_Text)) {
+                executionResults (CreateFailedExecutionResult (APIERR_BADID, "Element is not a Text or a Label of the Text class."));
+                continue;
+            }
+
+            Int32 from = 0;
+            Int32 range = 0;
+            GS::UniString content;
+            change.Get ("from", from);
+            change.Get ("range", range);
+            change.Get ("content", content);
+            if (from < 0 || range < 0) {
+                executionResults (CreateFailedExecutionResult (APIERR_BADPARS, "from and range must not be negative."));
+                continue;
+            }
+            if (content.FindFirst (GS::UniChar (char ('\n'))) != MaxUIndex || content.FindFirst (GS::UniChar (char ('\r'))) != MaxUIndex) {
+                executionResults (CreateFailedExecutionResult (APIERR_BADPARS, "The content must not contain line ends."));
+                continue;
+            }
+
+            API_ContentPars contentPars = {};
+            contentPars.head = element.header;
+            // from and range are in/out pointers, content a terminated C string (char*, as the builds show); all
+            // kept alive for the call. The content is passed as UTF-8; that Archicad reads it as UTF-8 and not in
+            // the system code page is unverified, so non-ASCII content must be checked in Archicad.
+            contentPars.from = &from;
+            contentPars.range = &range;
+            const auto contentCStr = content.ToCStr (CC_UTF8);
+            std::vector<char> contentChars (contentCStr.Get (), contentCStr.Get () + Strlen32 (contentCStr.Get ()) + 1);
+            contentPars.content = contentChars.data ();
+
+            err = ACAPI_Element_ChangeContent (&contentPars);
+            executionResults (err == NoError ? CreateSuccessfulExecutionResult () : CreateFailedExecutionResult (err, "Failed to change the content (a range over more than one paragraph or a from past the end of the content is refused)."));
+        }
+        return NoError;
+    });
+
+    return response;
+}
+
 CreateMeshesCommand::CreateMeshesCommand () :
     CreateElementsCommandBase ("CreateMeshes", API_MeshID, "meshesData")
 {}
@@ -2646,6 +2858,10 @@ GS::Optional<GS::UniString> CreateMeshesCommand::GetInputParametersSchema () con
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "floorIndex": {
                         "type": "integer"
@@ -2825,6 +3041,10 @@ GS::Optional<GS::UniString> CreateCurtainWallsCommand::GetInputParametersSchema 
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "coordinates": {
                         "type": "array",
@@ -3272,13 +3492,17 @@ GS::Optional<GS::UniString> CreateLabelsCommand::GetInputParametersSchema () con
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
                     },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
+                    },
                     "parentElementId": {
                         "$ref": "#/ElementId",
                         "description" : "The parent element if the label is an associative label."
                     },
                     "labelClass": {
                         "$ref": "#/LabelClass",
-                        "description": "Optional; if omitted, inherits the current Label tool default (which may silently resolve to either class - explicitly setting this avoids ambiguity)."
+                        "description": "Optional; if omitted, inherits the current Label tool default (which may silently resolve to either class - explicitly setting this avoids ambiguity). 'Symbol' needs a symbol library part, which only the Label tool default or the favorite given in favoriteName can provide: when those are a Text label, the item fails instead of placing a label without content."
                     },
                     "text": {
                         "type": "string",
@@ -3303,15 +3527,15 @@ GS::Optional<GS::UniString> CreateLabelsCommand::GetInputParametersSchema () con
                     },
                     "begCoordinate": {
                         "$ref": "#/Coordinate2D",
-                        "description": "The begin coordinate of leader line. Optional parameter, but either begCoordinate or parentElementId must be provided."
+                        "description": "The begin coordinate of leader line. Optional parameter, but either begCoordinate or parentElementId must be provided. Unless midCoordinate and endCoordinate are both given too, the label is created at its default position relative to the parent element (Archicad's 'createAtDefaultPosition'), so the label may not end up at begCoordinate - read it back with GetDetailsOfElements after creation."
                     },
                     "midCoordinate": {
                         "$ref": "#/Coordinate2D",
-                        "description": "The mid coordinate of leader line. Optional parameter."
+                        "description": "The mid coordinate of leader line. Optional parameter; give it together with endCoordinate to place the label exactly where the coordinates say."
                     },
                     "endCoordinate": {
                         "$ref": "#/Coordinate2D",
-                        "description": "The end coordinate of leader line. Optional parameter."
+                        "description": "The end coordinate of leader line. Optional parameter; give it together with midCoordinate to place the label exactly where the coordinates say."
                     },
 
                     "floorInd": {
@@ -3906,23 +4130,21 @@ GS::Optional<GS::ObjectState> ApplyTextContent (API_ElementMemo& memo, API_TextT
     return {};
 }
 
-GSErrCode AddTextContent (GS::ObjectState& os, const API_Guid& elemGuid)
+static GSErrCode GetTextContentMemo (const API_Guid& elemGuid, API_ElementMemo& memo)
 {
-    API_ElementMemo memo = {};
-    const GS::OnExit guard ([&memo] () { ACAPI_DisposeElemMemoHdls (&memo); });
 #ifdef ServerMainVers_2800
-    const GSErrCode err = ACAPI_Element_GetMemo (elemGuid, &memo, APIMemoMask_TextContent | APIMemoMask_Paragraph);
+    return ACAPI_Element_GetMemo (elemGuid, &memo, APIMemoMask_TextContent | APIMemoMask_Paragraph);
 #else
     // Before Archicad 28 the plain masks may return the content as an 8-bit string with byte
     // offsets; the *Uni masks return it as UTF-16 with character offsets, as it is read below.
-    const GSErrCode err = ACAPI_Element_GetMemo (elemGuid, &memo, APIMemoMask_TextContentUni | APIMemoMask_ParagraphUni);
+    return ACAPI_Element_GetMemo (elemGuid, &memo, APIMemoMask_TextContentUni | APIMemoMask_ParagraphUni);
 #endif
-    if (err != NoError) {
-        return err;
-    }
+}
 
+static GS::UniString GetTextContentFromMemo (const API_ElementMemo& memo)
+{
 #ifdef ServerMainVers_2800
-    const GS::UniString content = (memo.textContent != nullptr) ? *memo.textContent : GS::EmptyUniString;
+    return (memo.textContent != nullptr) ? *memo.textContent : GS::EmptyUniString;
 #else
     GS::UniString content;
     if (memo.textContent != nullptr) {
@@ -3939,8 +4161,55 @@ GSErrCode AddTextContent (GS::ObjectState& os, const API_Guid& elemGuid)
         }
         content = GS::UniString (reinterpret_cast<const GS::UniChar::Layout*> (chars), contentCharCount);
     }
+    return content;
 #endif
+}
+
+// The content read with the autotext flag off, in which an autotext reads as its "<KEY>" instead
+// of its value (the flag CreateElementsCommandBase also turns off, so a key given in the content
+// of CreateTexts/CreateLabels is placed as an autotext). The flag is restored right after the
+// read. Nothing is returned when the flag cannot be read or switched.
+static GS::Optional<GS::UniString> GetRawTextContent (const API_Guid& elemGuid)
+{
+    bool savedAutoTextFlag = false;
+    if (ACAPI_AutoText_GetAutoTextFlag (&savedAutoTextFlag) != NoError) {
+        return {};
+    }
+    if (savedAutoTextFlag) {
+        bool keysAutoTextFlag = false;
+        if (ACAPI_AutoText_ChangeAutoTextFlag (&keysAutoTextFlag) != NoError) {
+            return {};
+        }
+    }
+    const GS::OnExit flagGuard ([&savedAutoTextFlag] () {
+        if (savedAutoTextFlag) {
+            ACAPI_AutoText_ChangeAutoTextFlag (&savedAutoTextFlag);
+        }
+    });
+
+    API_ElementMemo memo = {};
+    const GS::OnExit guard ([&memo] () { ACAPI_DisposeElemMemoHdls (&memo); });
+    if (GetTextContentMemo (elemGuid, memo) != NoError) {
+        return {};
+    }
+    return GetTextContentFromMemo (memo);
+}
+
+GSErrCode AddTextContent (GS::ObjectState& os, const API_Guid& elemGuid)
+{
+    API_ElementMemo memo = {};
+    const GS::OnExit guard ([&memo] () { ACAPI_DisposeElemMemoHdls (&memo); });
+    const GSErrCode err = GetTextContentMemo (elemGuid, memo);
+    if (err != NoError) {
+        return err;
+    }
+
+    const GS::UniString content = GetTextContentFromMemo (memo);
     os.Add ("text", content);
+    const GS::Optional<GS::UniString> rawContent = GetRawTextContent (elemGuid);
+    if (rawContent.HasValue ()) {
+        os.Add ("rawText", *rawContent);
+    }
 
     const UInt32 nParagraphs = (memo.paragraphs != nullptr) ? static_cast<UInt32> (BMhGetSize (reinterpret_cast<GSHandle> (memo.paragraphs)) / sizeof (API_ParagraphType)) : 0;
     os.Add ("paragraphCount", static_cast<int> (nParagraphs));
@@ -4298,6 +4567,45 @@ static void CalcLabelParentBounds (const API_Elem_Head& parentElemHead, API_Box3
     }
 }
 
+// API_AddParType cannot carry Dictionary parameter values ("Dictionary parameters are currently
+// inaccessible with this structure", APIdefs_LibraryParts.h): the Label tool defaults list them, but
+// with an empty value. Passed on to ACAPI_Element_Create, the label is placed with an empty
+// dictionary, and a library part that reads one (Flexi_Zone_Label's hidden "dict_words") fails -
+// it is drawn as its hotspot only, and ACAPI_LibraryPart_OpenParameters on it answers
+// APIERR_GENERAL, so Get/SetGDLParametersOfElements refuse it (#742, found and tested on AC29 by
+// the reporter). Left out of memo.params, Archicad fills them in from the library part.
+static void RemoveDictionaryParameters (API_AddParType**& params)
+{
+    if (params == nullptr) {
+        return;
+    }
+    const GSSize count = BMGetHandleSize ((GSHandle) params) / sizeof (API_AddParType);
+    GSSize kept = 0;
+    for (GSSize ii = 0; ii < count; ++ii) {
+        if ((*params)[ii].typeID != APIParT_Dictionary) {
+            ++kept;
+        }
+    }
+    if (kept == count) {
+        return;
+    }
+    // A fresh handle instead of resizing in place: a handle from the API is not safe to hand to
+    // BMReallocHandle (#452). The kept entries move over as they are, with the handles of their
+    // array values, so only the outer block is freed here.
+    API_AddParType** filtered = reinterpret_cast<API_AddParType**> (BMAllocateHandle (kept * sizeof (API_AddParType), ALLOCATE_CLEAR, 0));
+    if (filtered == nullptr) {
+        return;
+    }
+    GSSize target = 0;
+    for (GSSize ii = 0; ii < count; ++ii) {
+        if ((*params)[ii].typeID != APIParT_Dictionary) {
+            (*filtered)[target++] = (*params)[ii];
+        }
+    }
+    BMKillHandle (reinterpret_cast<GSHandle*> (&params));
+    params = filtered;
+}
+
 GS::Optional<GS::ObjectState> CreateLabelsCommand::SetTypeSpecificParameters (API_Element& element, API_ElementMemo& memo, const Stories&, const GS::ObjectState& parameters) const
 {
     parameters.Get ("floorInd", element.header.floorInd);
@@ -4343,6 +4651,9 @@ GS::Optional<GS::ObjectState> CreateLabelsCommand::SetTypeSpecificParameters (AP
         element.label.createAtDefaultPosition = true;
     }
 
+    // The class the Label tool defaults (or the favorite applied to them) came with: only a Symbol
+    // default names a symbol library part in u.symbol, see the Symbol branch below.
+    const API_LblClassID defaultLabelClass = element.label.labelClass;
     GS::UniString labelClassStr;
     if (parameters.Get ("labelClass", labelClassStr)) {
         element.label.labelClass = (labelClassStr == "Symbol") ? APILblClass_Symbol : APILblClass_Text;
@@ -4380,6 +4691,45 @@ GS::Optional<GS::ObjectState> CreateLabelsCommand::SetTypeSpecificParameters (AP
                 return symbolStyleErr;
             }
         }
+
+        // u.symbol shares its storage with u.text: when the defaults are a Text label, u.symbol.libInd
+        // holds bytes of the text settings, which may by chance be a valid library part index of
+        // some unrelated library part. There is no input to name a symbol library part, so refuse
+        // instead of placing whatever that index points at (or nothing, as it did before).
+        if (defaultLabelClass != APILblClass_Symbol) {
+            GS::UniString favoriteName;
+            const bool fromFavorite = parameters.Get ("favoriteName", favoriteName) && !favoriteName.IsEmpty ();
+            return CreateErrorResponse (APIERR_BADPARS, GS::UniString ("labelClass 'Symbol' needs a symbol library part, but the ") + (fromFavorite ? "favorite '" + favoriteName + "'" : GS::UniString ("Label tool default")) + " is a Text label - apply a Symbol label favorite (favoriteName) or set the Label tool to a symbol label first.");
+        }
+
+        // A Symbol label is a library part instance, so ACAPI_Element_Create needs the library
+        // part's parameter list in memo.params. The Label tool defaults (or the favorite applied
+        // to them) normally carry it - for Flexi_Zone_Label all 140 parameters, checked on AC29
+        // (#742) - and those values are kept. Only defaults that carry none get the library
+        // part's own list, the way Window/Door markers (PrepareWindowOrDoorDefaults) and
+        // interior elevation markers get theirs.
+        const GSSize paramNum = memo.params != nullptr ? BMGetHandleSize ((GSHandle) memo.params) / sizeof (API_AddParType) : 0;
+        if (paramNum == 0) {
+            double a = 0.0;
+            double b = 0.0;
+            Int32 addParNum = 0;
+            API_AddParType** libPartPars = nullptr;
+            const GSErrCode paramsErr = ACAPI_LibraryPart_GetParams (element.label.u.symbol.libInd, &a, &b, &addParNum, &libPartPars);
+            if (paramsErr != NoError || libPartPars == nullptr) {
+                if (libPartPars != nullptr) {
+                    ACAPI_DisposeAddParHdl (&libPartPars);
+                }
+                return CreateErrorResponse (paramsErr != NoError ? paramsErr : APIERR_BADINDEX, "Failed to read the parameters of the symbol label's library part. The Label tool defaults do not name a valid symbol library part - apply a Symbol label favorite (favoriteName) or set the Label tool to a symbol label first.");
+            }
+            if (memo.params != nullptr) {
+                ACAPI_DisposeAddParHdl (&memo.params);
+            }
+            memo.params = libPartPars;
+        }
+
+        // Whichever list it is, it holds the Dictionary parameters with no value: see
+        // RemoveDictionaryParameters for why the label is broken when they are passed on.
+        RemoveDictionaryParameters (memo.params);
     }
 
     return {};
@@ -4405,6 +4755,10 @@ GS::Optional<GS::UniString> CreateTextsCommand::GetInputParametersSchema () cons
                     "favoriteName": {
                         "type": "string",
                         "description": "Optional name of a favorite to base the new element on. Its settings are applied first, then the explicitly given fields override them."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
                     },
                     "coordinate": {
                         "$ref": "#/Coordinate3D",
@@ -4568,6 +4922,10 @@ GS::Optional<GS::UniString> CreateLevelDimensionsCommand::GetInputParametersSche
                         "type": "string",
                         "description": "Optional name of a Level Dimension favorite to base the new element on. Its settings (marker, format, text style, layer, pen) are applied first, then the explicitly given fields override them."
                     },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional Element ID of the new element (the ID field of the Settings dialog, shown in schedules and labels; the same string GetDetailsOfElements returns as id). When omitted the element gets the next automatic ID of its tool."
+                    },
                     "position": {
                         "$ref": "#/Coordinate2D",
                         "description": "The location of the marker on the floor plan. With a parentElementId it must lie on that element, the measured level is the parent's height at this point. Outside the parent's outline Archicad still creates the dimension, but without a height (GetDetailsOfElements reads a level of -110000000)."
@@ -4729,4 +5087,194 @@ GS::Optional<GS::ObjectState> CreateLevelDimensionsCommand::SetTypeSpecificParam
     }
 
     return {};
+}
+
+MeasureTextsCommand::MeasureTextsCommand () :
+    CommandBase (CommonSchema::Used)
+{
+}
+
+GS::String MeasureTextsCommand::GetName () const
+{
+    return "MeasureTexts";
+}
+
+GS::Optional<GS::UniString> MeasureTextsCommand::GetInputParametersSchema () const
+{
+    return R"({
+        "type": "object",
+        "properties": {
+            "texts": {
+                "type": "array",
+                "description": "The texts to measure, each with the font, style and height it would be placed with. Nothing is created.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string", "description": "The text to measure. Newlines separate lines, each measured on its own; Windows-style CRLF (and bare CR) line endings are treated as LF." },
+                        "fontIndex": { "type": "integer", "description": "The index of the font, as GetDetailsOfElements reports it in fontIndex." },
+                        "fontName": { "type": "string", "description": "Name of the font, as the Font attributes carry it and GetDetailsOfElements reports it in fontName, e.g. 'Arial'. Resolved to the font's index (exact match first, then case-insensitive); the text fails when no loaded font has the name. Takes precedence over fontIndex if both are given. One of fontName and fontIndex is required." },
+                        "height": { "type": "number", "description": "The character height in millimetres, as a Text's height." },
+                        "bold": { "type": "boolean", "description": "Bold style. Optional, default false." },
+                        "italic": { "type": "boolean", "description": "Italic style. Optional, default false." },
+                        "underline": { "type": "boolean", "description": "Underline style. Optional, default false." },
+                        "slant": { "type": "number", "description": "The slant angle of the characters in radians; pi/2 (the default) is upright text." },
+                        "inModelUnits": { "type": "boolean", "description": "When true, Archicad applies the drawing scale correction and the lengths are model distances at the current drawing scale; when false (the default), they are lengths on paper in millimetres." }
+                    },
+                    "additionalProperties": false,
+                    "required": ["text", "height"]
+                }
+            }
+        },
+        "additionalProperties": false,
+        "required": ["texts"]
+    })";
+}
+
+GS::Optional<GS::UniString> MeasureTextsCommand::GetRawResponseSchema () const
+{
+    return R"({
+        "type": "object",
+        "properties": {
+            "measurements": {
+                "type": "array",
+                "description": "One item per input text, in the same order. The measurement takes no width factor or character spacing into account.",
+                "items": {
+                    "type": "object",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "length": { "type": "number", "description": "The length of the longest line." },
+                                "longestLineIndex": { "type": "integer", "description": "The zero-based index of the longest line (the first of them on a tie)." },
+                                "lineLengths": {
+                                    "type": "array",
+                                    "description": "The length of every line, in order. An empty line is 0.",
+                                    "items": { "type": "number" }
+                                },
+                                "capitalSizeFactor": { "type": "number", "description": "The ratio of the font's capital size to its typographic size. Absent when Archicad does not return it for the font." }
+                            },
+                            "additionalProperties": false,
+                            "required": ["length", "longestLineIndex", "lineLengths"]
+                        },
+                        {
+                            "$ref": "#/ErrorItem"
+                        }
+                    ]
+                }
+            }
+        },
+        "additionalProperties": false,
+        "required": ["measurements"]
+    })";
+}
+
+GS::ObjectState MeasureTextsCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
+{
+    GS::Array<GS::ObjectState> texts;
+    parameters.Get ("texts", texts);
+
+    GS::ObjectState response;
+    const auto& measurements = response.AddList<GS::ObjectState> ("measurements");
+
+    for (const GS::ObjectState& item : texts) {
+        GS::UniString text;
+        double height = 0.0;
+        if (!item.Get ("text", text) || !item.Get ("height", height)) {
+            measurements (CreateErrorResponse (APIERR_BADPARS, "Each text requires 'text' and 'height'."));
+            continue;
+        }
+        if (height <= 0.0) {
+            measurements (CreateErrorResponse (APIERR_BADPARS, "'height' must be greater than zero."));
+            continue;
+        }
+
+        GS::Optional<short> fontIndex;
+        const auto fontErr = TextLabelDetails::GetFontIndexFromDetails (item, fontIndex);
+        if (fontErr.HasValue ()) {
+            measurements (*fontErr);
+            continue;
+        }
+        if (!fontIndex.HasValue ()) {
+            measurements (CreateErrorResponse (APIERR_BADPARS, "Each text requires 'fontName' or 'fontIndex'."));
+            continue;
+        }
+
+        bool bold = false;
+        bool italic = false;
+        bool underline = false;
+        item.Get ("bold", bold);
+        item.Get ("italic", italic);
+        item.Get ("underline", underline);
+        double slant = 1.5707963267948966;
+        item.Get ("slant", slant);
+        bool inModelUnits = false;
+        item.Get ("inModelUnits", inModelUnits);
+
+        // Every line is measured on its own as a string without a line terminator (index -1),
+        // so the result does not depend on how the API picks or reports the longest line.
+        const GS::UniString normalized = NormalizeLineBreaks (text);
+        GS::Array<GS::UniString> lines;
+        UIndex lineStart = 0;
+        for (UIndex i = 0; i < normalized.GetLength (); ++i) {
+            if (normalized[i] == GS::UniChar ('\n')) {
+                lines.Push (GS::UniString (normalized.GetSubstring (lineStart, i - lineStart)));
+                lineStart = i + 1;
+            }
+        }
+        lines.Push (GS::UniString (normalized.GetSubstring (lineStart, normalized.GetLength () - lineStart)));
+
+        GS::Array<double> lineLengths;
+        GSErrCode err = NoError;
+        for (GS::UniString& line : lines) {
+            double lineLength = 0.0;
+            if (!line.IsEmpty ()) {
+                API_TextLinePars textLinePars = {};
+                textLinePars.index = -1;
+                textLinePars.drvScaleCorr = inModelUnits;
+                textLinePars.wantsLongestIndex = false;
+                textLinePars.wFont = *fontIndex;
+                textLinePars.wFace = static_cast<short> ((bold ? APIFace_Bold : 0) | (italic ? APIFace_Italic : 0) | (underline ? APIFace_Underline : 0));
+                textLinePars.wSlant = slant;
+                textLinePars.wSize = height;
+                textLinePars.lineStr = nullptr;
+                textLinePars.lineUniStr = &line;
+                err = ACAPI_Element_GetTextLineLength (&textLinePars, &lineLength);
+                if (err != NoError) {
+                    break;
+                }
+            }
+            lineLengths.Push (lineLength);
+        }
+        if (err != NoError) {
+            measurements (CreateErrorResponse (err, "Failed to measure the text."));
+            continue;
+        }
+
+        double longest = 0.0;
+        UIndex longestLineIndex = 0;
+        for (UIndex i = 0; i < lineLengths.GetSize (); ++i) {
+            if (lineLengths[i] > longest) {
+                longest = lineLengths[i];
+                longestLineIndex = i;
+            }
+        }
+
+        GS::ObjectState measurement;
+        measurement.Add ("length", longest);
+        measurement.Add ("longestLineIndex", static_cast<Int32> (longestLineIndex));
+        const auto& lineLengthList = measurement.AddList<double> ("lineLengths");
+        for (double lineLength : lineLengths) {
+            lineLengthList (lineLength);
+        }
+
+        short sizeFactorFont = *fontIndex;
+        double capitalSizeFactor = 0.0;
+        if (ACAPI_Element_GetTextSizeFactor (&sizeFactorFont, &capitalSizeFactor) == NoError) {
+            measurement.Add ("capitalSizeFactor", capitalSizeFactor);
+        }
+
+        measurements (measurement);
+    }
+
+    return response;
 }

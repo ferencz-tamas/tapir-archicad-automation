@@ -50,13 +50,16 @@ grasshopper-plugin/      C# Grasshopper plugin (.NET, produces .gha), packaged v
 builtin-scripts/         Bundled automation scripts
 branding/                Logos, diagrams
 docs/                    Generated docs (archicad-addon command reference),
-                         api-coverage/ page of the Archicad API coverage checklist
+                         api-coverage/ page of the Archicad API coverage checklist,
+                         gh-coverage/ page of the Grasshopper coverage checklist
 tools/                   Version bump scripts (update_version.py), package_info.json,
                          Add-On docs generator (generate_addon_docs.py),
                          command scaffolder (new_command.py),
                          Grasshopper GUI label table checker (check_tool_settings.py),
                          API coverage generator (generate_api_coverage.py,
-                         fetch_api_coverage_github_data.py, api_coverage_rules.json)
+                         fetch_api_coverage_github_data.py, api_coverage_rules.json),
+                         Grasshopper coverage generator (generate_gh_coverage.py,
+                         gh_coverage_rules.json)
   discord-issue-bot/     Discord -> GitHub issue bot (run by .github/workflows/discord_issue_bot.yml)
 sandbox/                 Experiments / scratch
 .github/workflows/       CI: build checks + release pipelines for both components
@@ -217,11 +220,19 @@ Every Grasshopper component uses the names a user sees in Archicad, not the API 
 ### Archicad tool components (target architecture)
 
 Elements are handled by **one component per Archicad tool** (Walls, Slabs, Columns, …) that
-mirrors the tool's settings dialog. It is introduced tool by tool, starting with Walls; new work on
-an element tool follows these rules:
+mirrors the tool's settings dialog. It is introduced tool by tool, starting with Walls (prototype:
+`Components/DesignToolsComponents/`, `ElementToolComponent` with `WallsComponent` and its `Walls_API`
+twin); new work on an element tool follows these rules:
 - **Name and place:** the plural tool name ("Walls"), in the group Graphisoft puts the tool in:
-  `GroupNames.DesignTools`, `DocumentTools` or `ViewpointTools` ("Design Tools", …; to be added
-  to `GroupNames.cs` with the first tool component).
+  `GroupNames.DesignTools` ("Design Tools"); `DocumentTools` and `ViewpointTools` are added with
+  their first component.
+- **Built from the table:** a tool component derives from `ElementToolComponent`, which builds its
+  JSON inputs and outputs from `ToolSettings/<Tool>.json` (embedded in the plugin); the subclass
+  only names the tool, its Create/Modify commands with the keys each accepts, its geometry
+  inputs and its dialog panels (`JsonGroups`). Saved definitions find parameters by position, so
+  the JSON parameters come last and `JsonGroups` is append-only: never reorder or remove a panel.
+  Execute checks the element type first (the Modify commands do not), and `PrepareSettings` drops
+  values the commands cannot write, so a JSON read by Refresh can always be fed back.
 - **Three buttons, one set of JSON objects:** *Refresh* reads (`GetDetailsOfElements`), *Execute*
   writes, *Create* makes new elements (the tool's `Create<Type>` command, starting from the tool
   defaults or the `FavoriteName` input). Writing and creating only happen on a button press; the
@@ -318,12 +329,32 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
   started by the issue bot and the review, dispatches the build checks and the
   review on each new head, links the built add-on in a comment asking the
   issue's author to test it in Archicad, and starts a `fix` run on a failed build,
-  a blocking review or a conflict with `main` (which it merges in), at most
+  a blocking review or a conflict with `main`, at most
   `BOT_PR_MAX_FIX_ROUNDS` (default 6) times, on at most `BOT_PR_SWEEP_BATCH`
   (default 15) PRs per sweep. Then
   it labels the PR `needs-maintainer` and stops; removing the label hands the PR
   back with its fix round and review counts reset. `BOT_PR_STEWARD=false` turns it
   off; `needs-maintainer`, `do-not-merge` or draft takes a PR out of its hands.
+  `main` is merged in by a step without a model and pushed with a GitHub App
+  installation token (secrets `TAPIR_BOT_APP_ID`, `TAPIR_BOT_APP_PRIVATE_KEY`;
+  App permissions Contents and Workflows read and write, installed on this
+  repository), because `GITHUB_TOKEN` may not push main's workflow changes: on
+  conflicts the model only resolves them in the working tree; the `push-merge`
+  job, on a fresh runner that never ran the model, redoes the merge in a new
+  clone, takes only the conflicted files from the model (an artifact), refuses
+  leftover conflict markers, and commits and pushes with git hooks off.
+  Conflicts under `.github/`, `tools/`, `archicad-addon/Tools/` or
+  `archicad-addon/Installer/` never go to the model. The App token exists only
+  in that job, never on the model's runner. The App's push starts the build checks
+  itself, so the sweep counts runs queued on a head as started, and the review
+  skips a bot's push to a bot PR (the steward dispatches it). Without the
+  secrets, a merge that brings workflow changes is handed over at once
+  ("Update branch"). A fix run that pushes nothing ends its comment with
+  `<!-- steward-fix-outcome: <outcome> <nonce> -->`: `transient-ci` re-runs the
+  failed build jobs and `review-disputed` starts a fresh review (each at most
+  twice per PR), `waits-for:#N` parks the PR without a label (commit status
+  `steward-fix` pending) until PR #N is merged; `merge-blocked`, `stuck` or no
+  marker hands it over at once.
 - Model tiers of these three Claude workflows, from repository variables
   (aliases, so each tier follows new models): `CLAUDE_LIGHT_MODEL` (default
   `sonnet`) for issue replies and PR re-reviews, `CLAUDE_MODEL` (default `opus`)
@@ -369,7 +400,14 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
   when set; `API_COVERAGE=false` turns it off. It uses `pull_request_target`, so it
   must never check out or run pull request code. Maintainers mark items skipped,
   with a reason, in the `skip` section of `tools/api_coverage_rules.json`; the
-  `notApplicable` section lists what cannot be a JSON command.
+  `notApplicable` section lists what cannot be a JSON command. The same run
+  writes the Grasshopper coverage (`tools/generate_gh_coverage.py`): which Tapir
+  commands a Grasshopper component calls (sent with `ToAddOn`; a same-named
+  official command sent with `ToArchicad` does not count) and whether the
+  components name every parameter of the command's input schema, cover the
+  rest through a JSON input, or miss some. It publishes `gh-coverage.*` to the
+  same branch, read by `docs/gh-coverage/index.html`; commands that need no
+  component go in `tools/gh_coverage_rules.json`.
 
 ## Installation (end users)
 
@@ -403,6 +441,8 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
 - Add-On JSON command reference: <https://enzyme-apd.github.io/tapir-archicad-automation/archicad-addon>
 - Archicad API coverage checklist: <https://enzyme-apd.github.io/tapir-archicad-automation/api-coverage/>
   (data on the `api-coverage` branch, generated by `.github/workflows/api_coverage.yml`)
+- Grasshopper coverage of the Tapir commands: <https://enzyme-apd.github.io/tapir-archicad-automation/gh-coverage/>
+  (same branch and workflow)
 - Developer docs (wiki): <https://github.com/ENZYME-APD/tapir-archicad-automation/wiki>
 - Add-On development guide: <https://github.com/ENZYME-APD/tapir-archicad-automation/wiki/Archicad-Add-On-Development>
 - Roadmap: <https://github.com/orgs/ENZYME-APD/projects/4/views/1>
