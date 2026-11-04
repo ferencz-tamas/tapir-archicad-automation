@@ -85,11 +85,44 @@ waiting out `startTimeout`.
 | `trial --ac 30 --build x.apx [files]` | the whole load, start, check, quit, restore cycle with a build of your own, no GitHub |
 | `record --out x.json` | write a check from the commands you send through it (below) |
 | `restore` | put your add-on back after a test that did not finish |
+| `bench` | speed and token benchmark of the open Archicad (below); `bench-compare old.json new.json` compares two runs |
 | `once`, `poll` | one pass, or a pass every `pollMinutes`, over what is labelled (for a scheduled task) |
 
 `--config` is only needed for a configuration somewhere else than the default. `--brief` prints
 the verdict line and at most five failures instead of the whole table. Exit codes: 0 passed or
 skipped, 1 a check failed, 2 the runner stopped.
+
+## Benchmark
+
+`bench` (or **Benchmark open Archicad** in the window) measures how fast Tapir answers and how
+many tokens its answers cost an agent, the same way every time, so runs on different builds,
+Archicad versions or machines can be compared. Open Archicad with a new, empty project and do not
+save it; it takes a few minutes (2.5 on Archicad 30 with an ordinary PC).
+
+It seeds the project with columns, walls and slabs (60/30/10 %) up to each scale of the suite
+(100, 1000 and 5000 elements), and at each scale times every case: whole-project reads, details
+with and without a field filter, property values, bounding boxes, quantities and a move of every
+element. Fixed reads (properties, layers, libraries, favorites) and pings run once; bursts of 1 to
+16 parallel calls show throughput and whether anything fails under load. Then it deletes what it
+made, also when stopped. For each case it records p50/p95 milliseconds, milliseconds and tokens
+per element, the answer's size, its tokens as the indented JSON the Tapir MCP server returns, and
+the tokens of the first page of 100 items that server hands out for a long list.
+
+| | |
+|---|---|
+| `bench --quick` | 100 elements, 2 runs per case: about a minute, for a first look |
+| `bench --scales 100,1000` | other scales than the suite's |
+| `bench --read-only` | the reads on the open project as it is (up to each scale); creates and moves nothing |
+| `bench --exact-tokens` | counts tokens with Anthropic's `count_tokens` (`pip install anthropic`, an API key) instead of estimating; it sends the measured answers to the API, so use it with `--read-only` only on projects you may share |
+| `bench --brief` | only the headline, errors and what changed against the last run |
+| `bench-compare old.json new.json` | every case whose p50 or tokens moved more than `--threshold` % (default 15; time changes under 5 ms never count); exit 1 when one got worse |
+
+Results go to `benchmarks/` next to the runner's configuration as `<time>_AC<version>_tapir<version>.json`
+with a Markdown report beside it, and each run is compared with the last run of the same Archicad,
+suite version and scales. The cases are data in [benchmarks/standard.json](benchmarks/standard.json):
+add cases freely, but raise its `version` when you change an existing one, since results are
+matched by case id and scale. Estimated tokens count a GUID as 24 tokens and the rest as one per
+3.4 characters; compare estimates with estimates.
 
 ## Writing checks
 
@@ -143,8 +176,9 @@ A pull request adds a JSON file to `archicad-addon/Test/checks/`. Example:
 - Checks run on every language version of Archicad, each with its own template and defaults (stair
   rules, pens, layers, units). Send every value the result depends on, and prefer differences
   (one more riser adds the going) over absolute values (the run is 4.15 m), which a template can shift.
-- `minTapir` skips the file on older add-ons. `requiresEmpty` changes the element types that
-  must be absent.
+- `minTapir` skips the file on older add-ons, `minArchicad` (e.g. `"27"`) on older Archicad
+  versions, for commands that need a newer Archicad API. `requiresEmpty` changes the element
+  types that must be absent.
 
 `checks/` holds examples taken from the October 2026 verification of #747-#753.
 

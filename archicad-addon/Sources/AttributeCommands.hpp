@@ -12,10 +12,30 @@ public:
     virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
 };
 
+class GetAttributeIndexesCommand : public CommandBase
+{
+public:
+    GetAttributeIndexesCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
 class GetAttributesFromProjectCommand : public CommandBase
 {
 public:
     GetAttributesFromProjectCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
+class ImportAttributesFromProjectCommand : public CommandBase
+{
+public:
+    ImportAttributesFromProjectCommand ();
     virtual GS::String GetName () const override;
     virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
     virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
@@ -47,6 +67,16 @@ class GetCurrentLayerCombinationCommand : public CommandBase
 public:
     GetCurrentLayerCombinationCommand ();
     virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
+class ActivateLayerCombinationCommand : public CommandBase
+{
+public:
+    ActivateLayerCombinationCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
     virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
     virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
 };
@@ -107,6 +137,30 @@ class GetCurrentPenTableCommand : public CommandBase
 {
 public:
     GetCurrentPenTableCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
+// Reads the pens in effect with ACAPI_Attribute_GetPen, which takes the AC27+ API_Pen.
+// Before AC27 it returns an error.
+class GetPensCommand : public CommandBase
+{
+public:
+    GetPensCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
+// The writing twin of GetPens: changes the pens in effect with ACAPI_Attribute_ModifyPen (AC27+).
+// Before AC27 it returns an error.
+class SetPensCommand : public CommandBase
+{
+public:
+    SetPensCommand ();
     virtual GS::String GetName () const override;
     virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
     virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
@@ -311,6 +365,19 @@ public:
     virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
 };
 
+// Changes single pens of the Pen Table in effect for the model views or the layouts, keeping every other pen
+// as it is. The pens of a Pen Table are written as a whole (see CreatePenTablesCommand), so the current pens
+// are read, the given ones are patched and the table is written back once.
+class ModifyPensCommand : public CommandBase
+{
+public:
+    ModifyPensCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
 class CreateProfilesCommand : public CommandBase
 {
 public:
@@ -403,6 +470,26 @@ class DeleteUserDataOfAttributesCommand : public CommandBase
 {
 public:
     DeleteUserDataOfAttributesCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
+class ReindexLayersCommand : public CommandBase
+{
+public:
+    ReindexLayersCommand ();
+    virtual GS::String GetName () const override;
+    virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
+    virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;
+    virtual GS::ObjectState Execute (const GS::ObjectState& parameters, GS::ProcessControl& processControl) const override;
+};
+
+class ReindexAttributesCommand : public CommandBase
+{
+public:
+    ReindexAttributesCommand ();
     virtual GS::String GetName () const override;
     virtual GS::Optional<GS::UniString> GetInputParametersSchema () const override;
     virtual GS::Optional<GS::UniString> GetRawResponseSchema () const override;

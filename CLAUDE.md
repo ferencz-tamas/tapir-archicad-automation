@@ -20,8 +20,18 @@ It consists of two main components:
 
 The Add-On uses the **Archicad API (DevKit)**. The API interface headers live under
 [archicad-addon/Build/DevKits/](archicad-addon/Build/DevKits/) — e.g.
-`archicad-addon/Build/DevKits/AC29/Support` for Archicad 29, with corresponding
-folders (`AC25`–`AC28`) for older versions.
+`archicad-addon/Build/DevKits/AC29/Support` for Archicad 29, with one folder per
+supported version.
+
+**Supported Archicad versions:** [archicad-addon/devkits.json](archicad-addon/devkits.json)
+is the one list of them, each with its DevKit release. The build checks, the release,
+the weekly release's asset count, the API coverage, the bots' DevKit download,
+`build_all_win.bat` and the docs generator all read it through
+[tools/devkits.py](tools/devkits.py). A new Archicad version needs no person:
+`.github/workflows/archicad_devkit_update.yml` adds it there when Graphisoft publishes
+its DevKit, and the bot pipeline builds, fixes and merges it (see CI). Never change a
+listed version's release on a whim: add-ons built with a later DevKit build may need a
+later Archicad update.
 
 The Add-On code is based on Tibor Lorantfy's original
 [archicad-additional-json-commands](https://github.com/tlorantfy/archicad-additional-json-commands).
@@ -36,12 +46,17 @@ workflow, so it is not repeated here.
 
 ```
 archicad-addon/          C++ Archicad Add-On
+  devkits.json           The supported Archicad versions and their DevKit releases
   Sources/               Command implementations (*.cpp/*.hpp), one file per command group
   Build/                 CMake build output + DevKits/ (downloaded Archicad API SDKs)
   Tools/                 Build/packaging scripts (CMake helpers, resource compiler, signing),
                          legacy auto-update script (update_addon_and_restart_archicad.py)
-  Examples/              Python usage examples (one .py per feature) + aclib/ helper
-  Test/                  test_examples.py runs Examples against TestProject.pla
+  Examples/              One example per command: <GroupFolder>/<CommandName>.py (+ an aclib.py
+                         shim per folder) and the aclib/ helper; shown in the command docs
+  Workflows/             Scripts combining several commands into a task or tool
+  Test/                  test_examples.py runs Scripts/ (regression tests, goldens in
+                         ExpectedOutputs/) and smoke-tests Examples against TestProject.pla;
+                         Scripts/manual/ are tests run by hand
   Installer/             Cross-platform end-user installer (tapir_installer.py, PyInstaller-packaged in CI)
   README.md
 grasshopper-plugin/      C# Grasshopper plugin (.NET, produces .gha), packaged via Yak
@@ -55,11 +70,13 @@ docs/                    Generated docs (archicad-addon command reference),
 tools/                   Version bump scripts (update_version.py), package_info.json,
                          Add-On docs generator (generate_addon_docs.py),
                          command scaffolder (new_command.py),
+                         one-example-per-command checker (check_examples.py),
                          Grasshopper GUI label table checker (check_tool_settings.py),
                          API coverage generator (generate_api_coverage.py,
                          fetch_api_coverage_github_data.py, api_coverage_rules.json),
                          Grasshopper coverage generator (generate_gh_coverage.py,
-                         gh_coverage_rules.json)
+                         gh_coverage_rules.json),
+                         Archicad version list reader and updater (devkits.py)
   discord-issue-bot/     Discord -> GitHub issue bot (run by .github/workflows/discord_issue_bot.yml)
 sandbox/                 Experiments / scratch
 .github/workflows/       CI: build checks + release pipelines for both components
@@ -127,8 +144,14 @@ the registration and a starter example. The Archicad API calls in `Execute` and 
 2. Implement input/response schemas; reuse `SchemaDefinitions` and `CommandBase` helpers.
 3. Register it in `AddOnMain.cpp` `Initialize()` with the version it is introduced in
    and a clear description.
-4. Add a Python example under [archicad-addon/Examples/](archicad-addon/Examples/) and,
-   if it should be tested, expected output under `Test/ExpectedOutputs/`.
+4. Add its example as `archicad-addon/Examples/<GroupFolder>/<CommandName>.py`: a module
+   docstring (shown as the example's description in the docs' *Example* popdown, which loads the
+   file from `main`) and a short script calling the command through `aclib`; the convention and
+   the `<GroupFolder>` rule (group name without "Commands" and parentheses, PascalCase, e.g.
+   `CustomData`, `MEP`) are in [archicad-addon/Examples/README.md](archicad-addon/Examples/README.md),
+   and `python tools/check_examples.py` checks them. A script that tests behaviour goes to
+   `archicad-addon/Test/Scripts/` (with its golden under `Test/ExpectedOutputs/` if
+   `test_examples.py` should compare it), a multi-command task to `archicad-addon/Workflows/`.
 5. Docs at <https://enzyme-apd.github.io/...> are generated from the registered
    descriptions and schemas by `python tools/generate_addon_docs.py` (no Archicad
    needed; same output as the `GenerateDocumentation` developer command). The weekly
@@ -141,7 +164,7 @@ Requires **CMake ≥ 3.17**, **Python** (for DevKit download + resource compilat
 and Visual Studio (Windows) / Xcode (macOS). The Archicad API DevKits are downloaded
 automatically by the build scripts.
 
-Windows, all supported versions (downloads DevKits, then builds AC25–AC30):
+Windows, all supported versions (downloads DevKits, then builds every version in `devkits.json`):
 
 ```bat
 cd archicad-addon\Tools
@@ -160,14 +183,14 @@ cmake --build Build/AC29 --config RelWithDebInfo
 Notes:
 - `AC_VERSION` selects the target Archicad major version; `AC_API_DEVKIT_DIR` must
   point at the matching DevKit's `Support` folder.
-- Toolset: `v142` for AC25–AC28, `v143` for AC29 and AC30 (see `build_all_win.bat`).
+- Toolset: `v142` before AC29, `v143` from AC29 (see `build_all_win.bat`).
 - Build config produces `TapirAddOn_AC<version>_<Win|Mac>` (`.apx` on Windows,
   `.bundle`/`.zip` on macOS).
 
 ## Testing the Add-On
 
-Tests are Python-based and run the example scripts against a running Archicad with
-the built Add-On loaded, comparing to golden outputs:
+Tests are Python-based and run scripts against a running Archicad with the built Add-On
+loaded, comparing to golden outputs:
 
 ```bash
 cd archicad-addon/Test
@@ -175,10 +198,15 @@ python test_examples.py
 ```
 
 - Requires the official `archicad` Python package (`ACConnection`) and a running
-  Archicad instance; `test_examples.py` opens `TestProject.pla`, runs each script in
-  [Examples/](archicad-addon/Examples/), and diffs against `ExpectedOutputs/`.
-- Example scripts talk to the Add-On via `ExecuteAddOnCommand(AddOnCommandId('TapirCommand', <CommandName>), params)`.
-- `aclib/` under `Examples/` is a small shared helper used by the example scripts.
+  Archicad instance; `test_examples.py` reopens `TestProject.pla` before each script, runs
+  every script in [Test/Scripts/](archicad-addon/Test/Scripts/) (diffed against
+  `ExpectedOutputs/<name>.py.output`) and every example in [Examples/](archicad-addon/Examples/)
+  as a smoke test (`ExpectedOutputs/Examples/<GroupFolder>/<name>.py.output`, recorded on the first
+  run; `EXAMPLES_NOT_SMOKE_TESTED` lists the examples that cannot run unattended). Names given on
+  the command line run only those; `record_expected_output.py <name>.py` records one golden.
+  `Test/Scripts/manual/` is not run.
+- The scripts use `aclib/` under `Examples/` (`aclib.RunTapirCommand`); `Workflows/`,
+  `Test/Scripts/` and each `Examples/<GroupFolder>/` have an `aclib.py` shim that loads it.
 - Pull requests and local builds are tested on real Archicad with
   [tools/community-test-runner/](tools/community-test-runner/) (JSON checks in
   `archicad-addon/Test/checks/`). Use its `--brief` output (`prs`, `test … --brief --no-post`,
@@ -284,13 +312,15 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
 - `archicad_addon_build_check.yml`, `grasshopper_plugin_build_check.yml`,
   `installer_build_check.yml` — PR build checks for each component, also run
   on pushes to `main` and by `workflow_dispatch` (which the bot PR steward
-  uses); a newer push to a pull request cancels its superseded runs. The installer
+  uses); a newer push to a pull request cancels its superseded runs. The add-on
+  check also runs `tools/check_examples.py` (one example per command). The installer
   check also runs `Installer/test_update_mode.py` and syntax-checks the legacy
   auto-update script.
 - `archicad_addon.yml`, `grasshopper_plugin.yml` — release/publish pipelines.
   `archicad_addon.yml` also builds the Tapir Installer executables
-  (`TapirInstaller_Win.exe`, `TapirInstaller_Mac.zip`); the release asset count
-  is mirrored in `EXPECTED_ASSETS` in `weekly_release.yml`. The Mac installer is
+  (`TapirInstaller_Win.exe`, `TapirInstaller_Mac.zip`); `weekly_release.yml`
+  expects two assets per version in `devkits.json` plus the two installers
+  (`EXPECTED_ASSETS`). The Mac installer is
   universal2 (Intel and Apple silicon): both workflows build it with the
   python.org Python pinned in their `env` (keep the two the same) and check it
   with `lipo`. The Windows installer is code signed by SignPath (certificate by
@@ -324,6 +354,26 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
   opened once the change or the discussion settles them. On the issue bot's PRs it
   also records its verdict as the `claude-review` commit status (set by a job
   without a model, from a nonce-tagged marker in the review).
+- The Claude jobs of `claude_issue_triage.yml` (`fix`, `reply`),
+  `claude_bot_pr_steward.yml` (`fix`) and `claude_pr_review.yml` get the DevKit
+  headers of every version in `devkits.json`, and the C/C++ sources of the newest
+  DevKit's Examples, in `archicad-addon/Build/DevKits/` before Claude starts, from
+  the cached [.github/actions/download-devkits](.github/actions/download-devkits/action.yml)
+  (which `api_coverage.yml` uses too).
+  The steward and the review load that action from a checkout of the workflow's own
+  commit, never from a pull request's branch; they read the pull request's
+  `devkits.json` (data only), so a PR adding a version has its headers.
+- `archicad_devkit_update.yml` — daily: when Graphisoft has published the DevKit of
+  an Archicad version newer than the newest in `devkits.json` (its first public
+  build, x.3000 or later, with Windows and macOS zips), `tools/devkits.py update` adds
+  it there and to the README's download table, and this opens a bot PR on a
+  `claude/devkit-<version>-<release>` branch and starts the steward. The steward
+  builds it and fixes what the new DevKit breaks, and `claude_auto_merge.yml`
+  merges it like any bot PR. `devkits.json` is a release critical path, so
+  auto-merge lets a bot PR through with it only when the file is `main`'s with new
+  versions appended (ascending, each `NN.NNNN` of its own version, nothing else
+  changed) and the branch is named after the newest one. `DEVKIT_UPDATE=false`
+  turns it off.
 - `claude_bot_pr_steward.yml` — drives the issue bot's PRs to mergeable without a
   maintainer (their `GITHUB_TOKEN` pushes start no runs): an hourly sweep, also
   started by the issue bot and the review, dispatches the build checks and the
@@ -386,8 +436,9 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
   no workflow on their own; see
   [tools/discord-issue-bot/README.md](tools/discord-issue-bot/README.md)).
 - `api_coverage.yml` — keeps the Archicad API coverage checklist live: on a push
-  to `main`, a release, pull request and issue events, hourly and by hand, it runs
-  `tools/generate_api_coverage.py` over the AC25–AC30 DevKits (C functions with
+  to `main`, a release, issue events, hourly (which picks up pull request changes)
+  and by hand, it runs
+  `tools/generate_api_coverage.py` over the DevKits in `devkits.json` (C functions with
   their older names and AC25/26 command ids, and the C++ `ACAPI::`/`IFCAPI::` API)
   and marks each item used on `main`, merged but not released, in an open PR,
   claimed by an open issue (the "Archicad API request" issue form), open, skipped
@@ -397,7 +448,8 @@ GitHub Actions in [.github/workflows/](.github/workflows/):
   image (`api-coverage.svg`, `api-coverage-dark.svg`), so the README never needs
   an edit when the coverage changes; it also writes the
   summary into the issue numbered in the `API_COVERAGE_ISSUE` repository variable
-  when set; `API_COVERAGE=false` turns it off. It uses `pull_request_target`, so it
+  when set; `API_COVERAGE=false` turns it off. It never runs on pull request
+  events (its check would only keep pull requests from showing green), and it
   must never check out or run pull request code. Maintainers mark items skipped,
   with a reason, in the `skip` section of `tools/api_coverage_rules.json`; the
   `notApplicable` section lists what cannot be a JSON command. The same run
