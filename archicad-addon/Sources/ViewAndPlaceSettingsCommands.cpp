@@ -2,6 +2,8 @@
 #include "ApplicationCommands.hpp"
 #include "MigrationHelper.hpp"
 
+#include <cmath>
+
 // The grid settings of the current database (API_GridType), the 'Filter and Cut Elements in 3D'
 // settings of the 3D window (API_3DFilterAndCutSettings), the search of a dimension standard by
 // name and the place settings (API_PlaceInfo: location, date, time and time zone). Every settings
@@ -278,7 +280,10 @@ public:
             if (!colorOs.Get (component, value) || value < 0.0 || value > 1.0) {
                 return false;
             }
-            target = value;
+            // Archicad stores these colours in 8 bits per component and truncates, so a value
+            // read back by GetGridSettings (printed with a few decimals, a hair below its 8-bit
+            // step) would lose one step. Snapping to the nearest step keeps the roundtrip exact.
+            target = std::round (value * 255.0) / 255.0;
             return true;
         };
         const bool valid = readComponent ("red", newColor.f_red) &&
@@ -374,7 +379,7 @@ static GS::ObjectState CreateRequiresArchicad27Response ()
 
 static const char* ColorSchema = R"({
                 "type": "object",
-                "description": "A color with transparency, each component from 0 to 1.",
+                "description": "A color with transparency, each component from 0 to 1. Archicad keeps 8 bits per component, so a value that is set is rounded to the nearest 1/255.",
                 "properties": {
                     "red": { "type": "number", "minimum": 0, "maximum": 1 },
                     "green": { "type": "number", "minimum": 0, "maximum": 1 },
@@ -802,7 +807,7 @@ GS::ObjectState FindDimensionStandardCommand::Execute (const GS::ObjectState& pa
 // ---------------------------------------------------------------------------------------------
 
 SetPlaceSettingsCommand::SetPlaceSettingsCommand () :
-    CommandBase (CommonSchema::NotUsed)
+    CommandBase (CommonSchema::Used)
 {}
 
 GS::String SetPlaceSettingsCommand::GetName () const
@@ -816,24 +821,7 @@ GS::Optional<GS::UniString> SetPlaceSettingsCommand::GetInputParametersSchema ()
     "type": "object",
     "properties": {
         "placeInfo": {
-            "type": "object",
-            "description": "The place settings to change (API_PlaceInfo), with its field names. Only the given keys are changed; an empty object changes nothing and returns the current settings.",
-            "properties": {
-                "longitude": { "type": "number", "description": "Longitude in degrees." },
-                "latitude": { "type": "number", "description": "Latitude in degrees." },
-                "altitude": { "type": "number", "description": "Altitude in meters." },
-                "north": { "type": "number", "description": "The north direction in radians." },
-                "year": { "type": "integer", "minimum": 0, "maximum": 65535 },
-                "month": { "type": "integer", "minimum": 1, "maximum": 12 },
-                "day": { "type": "integer", "minimum": 1, "maximum": 31 },
-                "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
-                "minute": { "type": "integer", "minimum": 0, "maximum": 59 },
-                "second": { "type": "integer", "minimum": 0, "maximum": 59 },
-                "sumTime": { "type": "boolean", "description": "Whether summer time (+1 hour) is on." },
-                "timeZoneInMinutes": { "type": "integer", "description": "The time zone, in minutes from Greenwich." },
-                "timeZoneOffset": { "type": "integer", "description": "Tells apart time zones with the same timeZoneInMinutes." }
-            },
-            "additionalProperties": false
+            "$ref": "#/PlaceSettingsUpdate"
         }
     },
     "additionalProperties": false,

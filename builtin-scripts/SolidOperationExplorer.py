@@ -3,6 +3,11 @@
 # dependencies = []
 # ///
 
+# /// tapir
+# category = "modeling-geometry"
+# changes = "model"
+# ///
+
 """
 Solid Operation Explorer
 

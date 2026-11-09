@@ -1,6 +1,7 @@
 using Grasshopper;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
+using Grasshopper.Kernel.Types;
 using Newtonsoft.Json;
 using Rhino.Geometry;
 using System;
@@ -8,6 +9,7 @@ using System.Collections.Generic;
 using TapirGrasshopperPlugin.Helps;
 using TapirGrasshopperPlugin.Types.Attributes;
 using TapirGrasshopperPlugin.Types.Element;
+using TapirGrasshopperPlugin.Types.Project;
 using Arc = TapirGrasshopperPlugin.Types.Element.Arc;
 
 namespace TapirGrasshopperPlugin.Components.ElementsComponents
@@ -36,19 +38,32 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
                 "ElementsGuids of the Elements to get the details of.");
         }
 
+        // The parameters of the command, from the inputs; false when there is
+        // nothing to ask for.
+        protected virtual bool TryGetParameters(
+            IGH_DataAccess da,
+            out object parameters)
+        {
+            var success = da.TryCreateFromList(
+                0,
+                out inputs);
+            parameters = inputs;
+            return success;
+        }
+
         protected override void Solve(
             IGH_DataAccess da)
         {
-            if (!da.TryCreateFromList(
-                    0,
-                    out inputs))
+            if (!TryGetParameters(
+                    da,
+                    out var parameters))
             {
                 return;
             }
 
             if (!TryGetConvertedCadValues(
                     CommandName,
-                    inputs,
+                    parameters,
                     ToAddOn,
                     JHelp.Deserialize<DetailsOfElementsObj>,
                     out response))
@@ -70,6 +85,84 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
         public GetDetailsOfElementsComponent()
             : base("ElementDetails")
         {
+        }
+
+        protected override void AddInputs()
+        {
+            base.AddInputs();
+
+            // Added after ElementGuids, so saved definitions keep their wiring.
+            InTexts(
+                "ElementTypes",
+                "Optional filter: keep only the elements of one of these types (connect an ElementsType value list).");
+
+            InIntegers(
+                "FloorIndices",
+                "Optional filter: keep only the elements whose home story has one of these indices.");
+
+            InIntegers(
+                "LayerIndices",
+                "Optional filter: keep only the elements on one of these layers (layer attribute indices).");
+
+            // Without ElementGuids the filter alone picks the elements: every
+            // element of the current database that matches it.
+            SetOptionality(
+                new[]
+                {
+                    0,
+                    1,
+                    2,
+                    3
+                });
+        }
+
+        protected override bool TryGetParameters(
+            IGH_DataAccess da,
+            out object parameters)
+        {
+            parameters = null;
+            inputs = null;
+
+            da.TryGetList(
+                1,
+                out List<string> types);
+            da.TryGetList(
+                2,
+                out List<int> floorIndices);
+            da.TryGetList(
+                3,
+                out List<int> layerIndices);
+            var filter = ElementTypeFloorLayerFilter.FromLists(
+                types,
+                floorIndices,
+                layerIndices);
+
+            da.TryGetList(
+                0,
+                out List<GH_ObjectWrapper> elementWrappers);
+            if (elementWrappers.Count > 0)
+            {
+                if (!elementWrappers.TryBuildObject(out inputs))
+                {
+                    return false;
+                }
+            }
+            else if (filter == null)
+            {
+                // Neither elements nor a filter: nothing to get, rather than
+                // the details of the whole project.
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Warning,
+                    "Connect ElementGuids, or a filter (ElementTypes, FloorIndices, LayerIndices).");
+                return false;
+            }
+
+            parameters = new GetDetailsOfElementsParameters
+            {
+                Elements = inputs?.Elements,
+                Filter = filter
+            };
+            return true;
         }
 
         protected override void AddOutputs()
@@ -108,6 +201,80 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
                 "Type-specific details of each element as JSON text " +
                 "(see the GetDetailsOfElements command documentation for the " +
                 "fields of each element type).");
+
+            OutNumbers(
+                "Elevations",
+                "Absolute elevation (project Z) of each element: the level of its " +
+                "home story plus its offset from that story (the zCoordinate of its " +
+                "Details; for objects and lamps the Z of their origin, for meshes the " +
+                "story level plus the mesh level). Null for the element types without " +
+                "a single base elevation, such as windows, doors, morphs, shells and " +
+                "curtain walls.");
+        }
+
+        // The absolute elevation of an element, or null when its type has
+        // none. storyLevels is filled on the first mesh, which is the only
+        // type whose details give an offset but no absolute Z.
+        private double? GetElevation(
+            DetailsOfElementObj detailsOfElement,
+            ref Dictionary<int, double> storyLevels)
+        {
+            var details = detailsOfElement.Details;
+            if (details == null)
+            {
+                return null;
+            }
+
+            var zCoordinate = details.Value<double?>("zCoordinate");
+            if (zCoordinate.HasValue)
+            {
+                return zCoordinate;
+            }
+
+            if (detailsOfElement.Type == "Object" ||
+                detailsOfElement.Type == "Lamp")
+            {
+                return details["origin"]?.Value<double?>("z");
+            }
+
+            if (detailsOfElement.Type == "Mesh")
+            {
+                var level = details.Value<double?>("level");
+                if (!level.HasValue)
+                {
+                    return null;
+                }
+
+                if (storyLevels == null)
+                {
+                    storyLevels = new Dictionary<int, double>();
+                    if (TryGetConvertedCadValues(
+                            "GetStories",
+                            null,
+                            ToAddOn,
+                            JHelp.Deserialize<StoriesData>,
+                            out StoriesData stories) &&
+                        stories?.Stories != null)
+                    {
+                        foreach (var story in stories.Stories)
+                        {
+                            if (story.Index.HasValue)
+                            {
+                                storyLevels[story.Index.Value] = story.Level;
+                            }
+                        }
+                    }
+                }
+
+                if (storyLevels.TryGetValue(
+                        detailsOfElement.FloorIndex,
+                        out var storyLevel))
+                {
+                    return storyLevel + level.Value;
+                }
+            }
+
+            return null;
         }
 
         protected override void ManageResponse(
@@ -121,6 +288,8 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
             var drawIndices = new List<int>();
             var floorPlanPolygonsTree = new DataTree<PolyCurve>();
             var details = new List<String>();
+            var elevations = new List<double?>();
+            Dictionary<int, double> storyLevels = null;
 
             for (var i = 0; i < response.DetailsOfElements.Count; i++)
             {
@@ -132,10 +301,14 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
                     continue;
                 }
 
+                // Without ElementGuids the filter picked the elements, and
+                // each entry names its own.
                 validElements.Add(
                     new ElementGuidWrapper
                     {
-                        ElementId = inputs.Elements[i].ElementId
+                        ElementId = inputs != null
+                            ? inputs.Elements[i].ElementId
+                            : detailsOfElement.ElementId
                     });
                 elemTypes.Add(detailsOfElement.Type);
                 elementIDs.Add(detailsOfElement.ElementID);
@@ -144,6 +317,10 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
                 drawIndices.Add(detailsOfElement.DrawIndex);
                 details.Add(
                     detailsOfElement.Details?.ToString(Formatting.Indented));
+                elevations.Add(
+                    GetElevation(
+                        detailsOfElement,
+                        ref storyLevels));
 
                 var floorPlanPolygons = new List<PolyCurve>();
                 if (detailsOfElement.FloorPlanPolygons != null)
@@ -189,6 +366,9 @@ namespace TapirGrasshopperPlugin.Components.ElementsComponents
             da.SetDataList(
                 7,
                 details);
+            da.SetDataList(
+                8,
+                elevations);
         }
 
         protected override System.Drawing.Bitmap Icon =>

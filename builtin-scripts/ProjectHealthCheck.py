@@ -3,6 +3,11 @@
 # dependencies = []
 # ///
 
+# /// tapir
+# category = "quality-assurance"
+# changes = "model"
+# ///
+
 """
 Project Health Check
 

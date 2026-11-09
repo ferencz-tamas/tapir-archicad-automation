@@ -1,5 +1,6 @@
 #include "ClassificationCommands.hpp"
 #include "MigrationHelper.hpp"
+#include "NotificationCommands.hpp"
 
 #ifdef ServerMainVers_2900
 #include <chrono>
@@ -92,9 +93,11 @@ GS::ObjectState GetClassificationsOfElementsCommand::Execute (const GS::ObjectSt
                 continue;
             }
 
-            classificationIds (GS::ObjectState (
-                "classificationSystemId", GS::ObjectState ("guid", APIGuidToString (systemGuid)),
-                "classificationItemId", GS::ObjectState ("guid", APIGuidToString (item.guid))));
+            GS::ObjectState classificationId ("classificationSystemId", GS::ObjectState ("guid", APIGuidToString (systemGuid)));
+            if (item.guid != APINULLGuid) {
+                classificationId.Add ("classificationItemId", GS::ObjectState ("guid", APIGuidToString (item.guid)));
+            }
+            classificationIds (classificationId);
         }
 
         elementClassifications (elementClassification);
@@ -140,16 +143,7 @@ GS::Optional<GS::UniString> GetElementsByClassificationCommand::GetRawResponseSc
                 "items": {
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "elements": {
-                                    "$ref": "#/Elements"
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": [
-                                "elements"
-                            ]
+                            "$ref": "#/ClassificationItemElements"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -217,6 +211,9 @@ GS::Optional<GS::UniString> SetClassificationsOfElementsCommand::GetInputParamet
         "properties": {
             "elementClassifications": {
                 "$ref": "#/ElementClassifications"
+            },
+            "dryRun": {
+                "$ref": "#/DryRun"
             }
         },
         "additionalProperties": false,
@@ -231,8 +228,12 @@ GS::Optional<GS::UniString> SetClassificationsOfElementsCommand::GetRawResponseS
     return R"({
         "type": "object",
         "properties": {
+            "dryRun": {
+                "$ref": "#/DryRunFlag"
+            },
             "executionResults": {
-                "$ref": "#/ExecutionResults"
+                "$ref": "#/ChangeExecutionResults",
+                "description": "One result for each item of elementClassifications, in the order of the input. On a dry run an item that passes every check made before writing (the classification item and its system exist, the element's classification in that system can be read) gets wouldChange: oldValue is the element's classificationId in the system now and newValue the one a real run would set, both as GetClassificationsOfElements gives them (without classificationItemId when the element is or would be unclassified in the system). Archicad can still refuse an item that passes them."
             }
         },
         "additionalProperties": false,
@@ -242,15 +243,39 @@ GS::Optional<GS::UniString> SetClassificationsOfElementsCommand::GetRawResponseS
     })";
 }
 
+// A classificationId as GetClassificationsOfElements gives it: without classificationItemId when itemGuid is APINULLGuid (unclassified).
+static GS::ObjectState CreateClassificationIdObjectState (const API_Guid& systemGuid, const API_Guid& itemGuid)
+{
+    GS::ObjectState classificationId ("classificationSystemId", GS::ObjectState ("guid", APIGuidToString (systemGuid)));
+    if (itemGuid != APINULLGuid) {
+        classificationId.Add ("classificationItemId", GS::ObjectState ("guid", APIGuidToString (itemGuid)));
+    }
+    return classificationId;
+}
+
 GS::ObjectState SetClassificationsOfElementsCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
 {
     GS::Array<GS::ObjectState> elementClassifications;
     parameters.Get ("elementClassifications", elementClassifications);
+    const bool dryRun = IsDryRun (parameters);
 
     GS::ObjectState response;
+    AddDryRunField (response, dryRun);
     const auto& executionResults = response.AddList<GS::ObjectState> ("executionResults");
 
-    ACAPI_CallUndoableCommand ("SetClassificationsOfElementsCommand", [&] () -> GSErrCode {
+    // A classification change may leave the element's modification stamp as it was, so the
+    // elements classified are marked changed for the notification clients.
+    ElementChangeReporter changeReporter;
+    for (const GS::ObjectState& elementClassification : elementClassifications) {
+        const GS::ObjectState* elementId = elementClassification.Get ("elementId");
+        if (elementId != nullptr) {
+            changeReporter.Add (GetGuidFromObjectState (*elementId));
+        }
+    }
+
+    // On a dry run the same checks are made, outside an undo scope, and each classification that
+    // would be set is reported with the element's classification in that system now.
+    CallUndoableCommandOrDryRun (dryRun, "SetClassificationsOfElementsCommand", [&] () -> GSErrCode {
         for (const GS::ObjectState& elementClassification : elementClassifications) {
             const GS::ObjectState* elementId = elementClassification.Get ("elementId");
             if (elementId == nullptr) {
@@ -269,6 +294,25 @@ GS::ObjectState SetClassificationsOfElementsCommand::Execute (const GS::ObjectSt
             const GS::ObjectState* classificationItemId = classificationId->Get ("classificationItemId");
             if (classificationItemId != nullptr) {
                 const API_Guid classificationItemGuid = GetGuidFromObjectState (*classificationItemId);
+
+                if (dryRun) {
+                    // ACAPI_Element_AddClassificationItem fails on an item or element that does not
+                    // exist; reading the item's system and the element's classification in it fails the same way.
+                    API_ClassificationSystem system;
+                    GSErrCode err = ACAPI_Classification_GetClassificationItemSystem (classificationItemGuid, system);
+                    API_ClassificationItem oldItem;
+                    if (err == NoError) {
+                        err = ACAPI_Element_GetClassificationInSystem (elemGuid, system.guid, oldItem);
+                    }
+                    if (err != NoError) {
+                        executionResults (CreateFailedExecutionResult (err, "Failed to set classification item for element"));
+                        continue;
+                    }
+                    executionResults (CreateWouldChangeExecutionResult (GS::ObjectState (
+                        "oldValue", CreateClassificationIdObjectState (system.guid, oldItem.guid),
+                        "newValue", CreateClassificationIdObjectState (system.guid, classificationItemGuid))));
+                    continue;
+                }
 
                 const GSErrCode err = ACAPI_Element_AddClassificationItem (elemGuid, classificationItemGuid);
                 if (err != NoError) {
@@ -291,18 +335,32 @@ GS::ObjectState SetClassificationsOfElementsCommand::Execute (const GS::ObjectSt
                     continue;
                 }
 
-                err = ACAPI_Element_RemoveClassificationItem (elemGuid, item.guid);
-                if (err != NoError) {
-                    executionResults (CreateFailedExecutionResult (err, "Failed to remove classification item for element"));
+                if (dryRun) {
+                    executionResults (CreateWouldChangeExecutionResult (GS::ObjectState (
+                        "oldValue", CreateClassificationIdObjectState (classificationSystemGuid, item.guid),
+                        "newValue", CreateClassificationIdObjectState (classificationSystemGuid, APINULLGuid))));
                     continue;
+                }
+
+                if (item.guid != APINULLGuid) {
+                    err = ACAPI_Element_RemoveClassificationItem (elemGuid, item.guid);
+                    if (err != NoError) {
+                        executionResults (CreateFailedExecutionResult (err, "Failed to remove classification item for element"));
+                        continue;
+                    }
                 }
             }
 
+            changeReporter.MarkChanged (elemGuid);
             executionResults (CreateSuccessfulExecutionResult ());
         }
 
         return NoError;
     });
+
+    if (!dryRun) {
+        changeReporter.Report ();
+    }
 
     return response;
 }
@@ -345,18 +403,7 @@ GS::Optional<GS::UniString> GetClassificationsOfAttributesCommand::GetRawRespons
                     "type": "object",
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "classificationIds": {
-                                    "type": "array",
-                                    "description": "The classification of the attribute in every classification system it is classified in.",
-                                    "items": {
-                                        "$ref": "#/ClassificationId"
-                                    }
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": [ "classificationIds" ]
+                            "$ref": "#/AttributeClassifications"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -433,21 +480,7 @@ GS::Optional<GS::UniString> SetClassificationsOfAttributesCommand::GetInputParam
                 "type": "array",
                 "description": "The classifications to set, one per attribute and classification system.",
                 "items": {
-                    "type": "object",
-                    "properties": {
-                        "attributeId": {
-                            "$ref": "#/AttributeId"
-                        },
-                        "classificationId": {
-                            "$ref": "#/ClassificationId",
-                            "description": "The classification to set. The item replaces the attribute's current item in the same classification system. If the classificationItemId field is omitted, the attribute becomes unclassified in the given system."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                        "attributeId",
-                        "classificationId"
-                    ]
+                    "$ref": "#/AttributeClassification"
                 }
             }
         },
@@ -812,20 +845,7 @@ GS::Optional<GS::UniString> SetClassificationsOfElementDefaultsCommand::GetInput
                 "type": "array",
                 "description": "The classifications to set on the tool defaults (the settings new elements get).",
                 "items": {
-                    "type": "object",
-                    "properties": {
-                        "elementType": {
-                            "$ref": "#/ElementType"
-                        },
-                        "classificationId": {
-                            "$ref": "#/ClassificationId"
-                        }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                        "elementType",
-                        "classificationId"
-                    ]
+                    "$ref": "#/ElementDefaultClassification"
                 }
             }
         },
@@ -965,20 +985,7 @@ GS::Optional<GS::UniString> GetClassificationsOfToolDefaultsCommand::GetRawRespo
                 "items": {
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "classificationIds": {
-                                    "type": "array",
-                                    "description": "One item for each classification system in which the tool default is classified. Systems in which it is unclassified are left out.",
-                                    "items": {
-                                        "$ref": "#/ClassificationId"
-                                    }
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": [
-                                "classificationIds"
-                            ]
+                            "$ref": "#/ToolDefaultClassifications"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -1053,41 +1060,7 @@ GS::Optional<GS::UniString> GetAllClassificationSystemsCommand::GetRawResponseSc
                 "type": "array",
                 "description": "The classification systems of the project.",
                 "items": {
-                    "type": "object",
-                    "properties": {
-                        "classificationSystemId": {
-                            "$ref": "#/ClassificationSystemId"
-                        },
-                        "name": {
-                            "type": "string",
-                            "description": "The display name of the classification system."
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "The description of the classification system."
-                        },
-                        "source": {
-                            "type": "string",
-                            "description": "The source of the classification system (e.g. URL to a classification system standard)."
-                        },
-                        "version": {
-                            "type": "string",
-                            "description": "The version of the classification system."
-                        },
-                        "date": {
-                            "$ref": "#/Date",
-                            "description": "The release date of the classification system's current version."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                        "classificationSystemId",
-                        "name",
-                        "description",
-                        "source",
-                        "version",
-                        "date"
-                    ]
+                    "$ref": "#/ClassificationSystemSummary"
                 }
             }
         },
@@ -1397,6 +1370,9 @@ GS::Optional<GS::UniString> DeleteClassificationSystemsCommand::GetInputParamete
         "properties": {
             "classificationSystemIds": {
                 "$ref": "#/ClassificationSystemIds"
+            },
+            "dryRun": {
+                "$ref": "#/DryRun"
             }
         },
         "additionalProperties": false,
@@ -1411,8 +1387,12 @@ GS::Optional<GS::UniString> DeleteClassificationSystemsCommand::GetRawResponseSc
     return R"({
         "type": "object",
         "properties": {
+            "dryRun": {
+                "$ref": "#/DryRunFlag"
+            },
             "executionResults": {
-                "$ref": "#/ExecutionResults"
+                "$ref": "#/DeletionExecutionResults",
+                "description": "One result for each input classification system, in the order of the input. On a dry run a classification system that exists gets wouldDelete; Archicad can still refuse to delete one that exists."
             }
         },
         "additionalProperties": false,
@@ -1424,35 +1404,23 @@ GS::Optional<GS::UniString> DeleteClassificationSystemsCommand::GetRawResponseSc
 
 GS::ObjectState DeleteClassificationSystemsCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
 {
-    GS::Array<GS::ObjectState> classificationSystemIds;
-    parameters.Get ("classificationSystemIds", classificationSystemIds);
-
-    GS::ObjectState response;
-    const auto& executionResults = response.AddList<GS::ObjectState> ("executionResults");
-
-    ACAPI_CallUndoableCommand ("DeleteClassificationSystemsCommand", [&]() -> GSErrCode {
-        for (const GS::ObjectState& classificationSystemId : classificationSystemIds) {
-            const GS::ObjectState* systemId = classificationSystemId.Get ("classificationSystemId");
-            if (systemId == nullptr) {
-                executionResults (CreateFailedExecutionResult (APIERR_BADPARS, "classificationSystemId is missing"));
-                continue;
+    const bool dryRun = IsDryRun (parameters);
+    return ExecuteForEachIdInList (parameters, "classificationSystemIds", "classificationSystemId", "DeleteClassificationSystemsCommand", [dryRun] (const API_Guid& systemGuid) {
+        if (dryRun) {
+            API_ClassificationSystem system;
+            system.guid = systemGuid;
+            const GSErrCode getErr = ACAPI_Classification_GetClassificationSystem (system);
+            if (getErr != NoError) {
+                return CreateFailedExecutionResult (getErr, "failed to delete classification system");
             }
-
-            const API_Guid systemGuid = GetGuidFromObjectState (*systemId);
-
-            GSErrCode err = ACAPI_Classification_DeleteClassificationSystem (systemGuid);
-            if (err != NoError) {
-                executionResults (CreateFailedExecutionResult (err, "failed to delete classification system"));
-                continue;
-            }
-
-            executionResults (CreateSuccessfulExecutionResult ());
+            return CreateDryRunExecutionResult ("wouldDelete");
         }
-
-        return NoError;
-    });
-
-    return response;
+        const GSErrCode err = ACAPI_Classification_DeleteClassificationSystem (systemGuid);
+        if (err != NoError) {
+            return CreateFailedExecutionResult (err, "failed to delete classification system");
+        }
+        return CreateSuccessfulExecutionResult ();
+    }, dryRun);
 }
 
 DeleteClassificationItemsCommand::DeleteClassificationItemsCommand () :
@@ -1472,6 +1440,9 @@ GS::Optional<GS::UniString> DeleteClassificationItemsCommand::GetInputParameters
         "properties": {
             "classificationItemIds": {
                 "$ref": "#/ClassificationItemIds"
+            },
+            "dryRun": {
+                "$ref": "#/DryRun"
             }
         },
         "additionalProperties": false,
@@ -1486,8 +1457,12 @@ GS::Optional<GS::UniString> DeleteClassificationItemsCommand::GetRawResponseSche
     return R"({
         "type": "object",
         "properties": {
+            "dryRun": {
+                "$ref": "#/DryRunFlag"
+            },
             "executionResults": {
-                "$ref": "#/ExecutionResults"
+                "$ref": "#/DeletionExecutionResults",
+                "description": "One result for each input classification item, in the order of the input. On a dry run a classification item that exists gets wouldDelete; Archicad can still refuse to delete one that exists."
             }
         },
         "additionalProperties": false,
@@ -1499,35 +1474,23 @@ GS::Optional<GS::UniString> DeleteClassificationItemsCommand::GetRawResponseSche
 
 GS::ObjectState DeleteClassificationItemsCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
 {
-    GS::Array<GS::ObjectState> classificationItemIds;
-    parameters.Get ("classificationItemIds", classificationItemIds);
-
-    GS::ObjectState response;
-    const auto& executionResults = response.AddList<GS::ObjectState> ("executionResults");
-
-    ACAPI_CallUndoableCommand ("DeleteClassificationItemsCommand", [&]() -> GSErrCode {
-        for (const GS::ObjectState& classificationItemId : classificationItemIds) {
-            const GS::ObjectState* itemId = classificationItemId.Get ("classificationItemId");
-            if (itemId == nullptr) {
-                executionResults (CreateFailedExecutionResult (APIERR_BADPARS, "classificationItemId is missing"));
-                continue;
+    const bool dryRun = IsDryRun (parameters);
+    return ExecuteForEachIdInList (parameters, "classificationItemIds", "classificationItemId", "DeleteClassificationItemsCommand", [dryRun] (const API_Guid& itemGuid) {
+        if (dryRun) {
+            API_ClassificationItem item;
+            item.guid = itemGuid;
+            const GSErrCode getErr = ACAPI_Classification_GetClassificationItem (item);
+            if (getErr != NoError) {
+                return CreateFailedExecutionResult (getErr, "failed to delete classification item");
             }
-
-            const API_Guid itemGuid = GetGuidFromObjectState (*itemId);
-
-            GSErrCode err = ACAPI_Classification_DeleteClassificationItem (itemGuid);
-            if (err != NoError) {
-                executionResults (CreateFailedExecutionResult (err, "failed to delete classification item"));
-                continue;
-            }
-
-            executionResults (CreateSuccessfulExecutionResult ());
+            return CreateDryRunExecutionResult ("wouldDelete");
         }
-
-        return NoError;
-    });
-
-    return response;
+        const GSErrCode err = ACAPI_Classification_DeleteClassificationItem (itemGuid);
+        if (err != NoError) {
+            return CreateFailedExecutionResult (err, "failed to delete classification item");
+        }
+        return CreateSuccessfulExecutionResult ();
+    }, dryRun);
 }
 
 UpdateClassificationSystemsCommand::UpdateClassificationSystemsCommand () :
@@ -1756,21 +1719,7 @@ GS::Optional<GS::UniString> GetClassificationItemParentsCommand::GetRawResponseS
                     "type": "object",
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "classificationSystemId": {
-                                    "$ref": "#/ClassificationSystemId",
-                                    "description": "The classification system the item belongs to."
-                                },
-                                "parentClassificationItemId": {
-                                    "$ref": "#/ClassificationItemId",
-                                    "description": "The parent item. Missing for a top level item of its system."
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": [
-                                "classificationSystemId"
-                            ]
+                            "$ref": "#/ClassificationItemParent"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -2000,42 +1949,7 @@ GS::Optional<GS::UniString> GetClassificationItemVisibilityCommand::GetRawRespon
                     "type": "object",
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "visibilities": {
-                                    "type": "array",
-                                    "description": "One entry per classification item, in the order of the input. A non-existing classification item is represented by an error object.",
-                                    "items": {
-                                        "type": "object",
-                                        "oneOf": [
-                                            {
-                                                "type": "object",
-                                                "properties": {
-                                                    "classificationItemId": {
-                                                        "$ref": "#/ClassificationItemId"
-                                                    },
-                                                    "isVisible": {
-                                                        "type": "boolean",
-                                                        "description": "Whether the classification item is visible (offered) for the target, as Archicad reports it. It can be true even if a parent item is not visible. It does not tell whether the target is classified with the item."
-                                                    }
-                                                },
-                                                "additionalProperties": false,
-                                                "required": [
-                                                    "classificationItemId",
-                                                    "isVisible"
-                                                ]
-                                            },
-                                            {
-                                                "$ref": "#/ErrorItem"
-                                            }
-                                        ]
-                                    }
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": [
-                                "visibilities"
-                            ]
+                            "$ref": "#/ClassificationItemVisibilities"
                         },
                         {
                             "$ref": "#/ErrorItem"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -142,6 +143,18 @@ class AddOnListTest(unittest.TestCase):
         found = {a["version"]: Path(a["blankTemplate"]).name for a in rw.find_archicads(str(root))}
         self.assertEqual(found, {"26": "01 Archicad Beispiel-Vorlage.tpl", "30": "00 Archicad INT Template.tpl"})
 
+    def test_finds_archicads_installed_anywhere(self):
+        elsewhere = Path(self.tmp.name) / "E" / "Apps" / "AC29"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "Archicad.exe").write_bytes(b"")
+        programs = [("Archicad 29 R1 INT", str(elsewhere)), ("Archicad 30 R1 INT", str(Path(self.tmp.name) / "removed")),
+                    ("Archicad Licensing", ""), ("ARCHICAD 24 INT", str(elsewhere))]
+        with unittest.mock.patch.object(rw, "installed_programs", return_value=programs), \
+             unittest.mock.patch.object(rw, "graphisoft_folder", return_value=[]):
+            found = rw.find_archicads()
+        self.assertEqual([(a["version"], a["archicadExe"]) for a in found], [("29", str(elsewhere / "Archicad.exe")),
+                                                                        ("24", str(elsewhere / "Archicad.exe"))])
+
     def test_listening_ports_in_a_localized_netstat(self):
         out = ("  TCP    0.0.0.0:19723          0.0.0.0:0              ABHÖREN         45264\n"
                "  TCP    0.0.0.0:19724          0.0.0.0:0              LISTENING       39092\n"
@@ -149,6 +162,7 @@ class AddOnListTest(unittest.TestCase):
                "  TCP    127.0.0.1:19723        127.0.0.1:63357        WARTEND         45264\n")
         self.assertEqual(r.listening_ports(out, {45264}), {19723, 19725})
 
+    @unittest.skipUnless(os.name == "nt", "a Windows path")
     def test_urls_round_trip(self):
         path = Path(r"C:\Users\A B\Tapir #1\TapirAddOn_AC30_Win.apx")
         self.assertEqual(rw.to_url(path), "lan.flat:///C:/Users/A%20B/Tapir%20%231/TapirAddOn_AC30_Win.apx")
@@ -156,8 +170,12 @@ class AddOnListTest(unittest.TestCase):
 
 
 class InstallationTest(unittest.TestCase):
+    """Windows' side, on any system."""
+
     def setUp(self):
-        self.patches = [unittest.mock.patch.object(r, "archicad_running", return_value=False),
+        self.patches = [unittest.mock.patch.object(r, "MACOS", False),
+                        unittest.mock.patch.object(r, "host", rw),
+                        unittest.mock.patch.object(r, "archicad_running", return_value=False),
                         unittest.mock.patch.object(r, "archicad_pids", return_value={1}),
                         unittest.mock.patch.object(r.subprocess, "Popen"),
                         unittest.mock.patch.object(r.time, "sleep")]
@@ -170,13 +188,33 @@ class InstallationTest(unittest.TestCase):
         for p in self.patches:
             p.stop()
 
+    def test_a_crash_report_left_open_by_an_earlier_crash_is_not_this_runs(self):
+        folder = str(Path(tempfile.gettempdir()) / "Archicad 28")
+        exe, reporter = str(Path(folder) / "Archicad.exe"), str(Path(folder) / "GSReport.exe")
+        with unittest.mock.patch.object(r, "processes", return_value={7: reporter, 9: exe}):
+            before = r.crash_reporters(exe)
+            self.assertEqual(before, {7})
+            self.assertFalse(r.crash_reporter_running(exe, before))
+        with unittest.mock.patch.object(r, "processes", return_value={7: reporter, 8: reporter}):
+            self.assertTrue(r.crash_reporter_running(exe, before))
+
     def test_a_dialog_stops_the_start_and_is_named(self):
         with unittest.mock.patch.object(r, "find_port", return_value=None), \
-                unittest.mock.patch.object(r.os, "name", "nt"), \
                 unittest.mock.patch.object(rw, "dialogs", return_value=["Archicad-Umgebung"]) as dialogs, \
                 self.assertRaisesRegex(RuntimeError, "Archicad-Umgebung.*1150"):
             r.Installation(self.ac).start()
         self.assertEqual(dialogs.call_count, 3)  # three polls in a row, not the whole startTimeout
+
+    def test_hidden_starts_on_the_runners_desktop_and_says_where_a_dialog_is(self):
+        # hidden() itself, not os.name: an os.name of "nt" makes every Path a WindowsPath elsewhere.
+        with unittest.mock.patch.object(r, "find_port", return_value=None), \
+                unittest.mock.patch.object(r.Installation, "hidden", return_value=True), \
+                unittest.mock.patch.object(rw, "start_hidden") as start_hidden, \
+                unittest.mock.patch.object(rw, "dialogs", return_value=["Lizenz"]), \
+                self.assertRaisesRegex(RuntimeError, "'show' takes you there"):
+            r.Installation(dict(self.ac, hidden=True)).start()
+        start_hidden.assert_called_once_with(["Archicad.exe", "t.tpl"])
+        r.subprocess.Popen.assert_not_called()
 
     def test_no_administrator_rights_is_said_plainly(self):
         with unittest.mock.patch.object(r.shutil, "copy2", side_effect=PermissionError(13, "Access is denied")), \

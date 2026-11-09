@@ -428,16 +428,7 @@ GS::Optional<GS::UniString> CreateDetailsCommand::GetRawResponseSchema () const
                 "items": {
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "databaseId": { "$ref": "#/DatabaseId" },
-                                "navigatorItemId": {
-                                    "$ref": "#/NavigatorItemId",
-                                    "description": "The Project Map item of the new database, for ChangeWindow or CreateDrawings. Missing when the item could not be found."
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": ["databaseId"]
+                            "$ref": "#/CreatedDatabase"
                         },
                         { "$ref": "#/ErrorItem" }
                     ]
@@ -568,9 +559,8 @@ GS::Optional<GS::UniString> CreateLayoutCommand::GetInputParametersSchema () con
                             "description": "The sibling after which the new layout is placed, as in MoveNavigatorItem. It must be a child of parentNavigatorItemId (or of the Layout Book root when that is omitted). Cannot be combined with position."
                         },
                         "position": {
-                            "type": "string",
-                            "enum": ["first", "last"],
-                            "description": "Where to place the new layout under its parent. Archicad inserts new layouts at the first place, which renumbers the sheets after them; \"last\" appends it after the existing children instead. Cannot be combined with previousNavigatorItemId."
+                            "$ref": "#/LayoutInsertionPosition",
+                            "description": "Archicad inserts new layouts at the first place, which renumbers the sheets after them; \"last\" appends it after the existing children instead. Cannot be combined with previousNavigatorItemId."
                         },
                         "paperWidth":            { "type": "number", "description": "Optional paper width in mm, used together with paperHeight. Sets the size of the new layout, and of the master layout when this command creates it from masterLayoutName: a new master starts with the template's default size, which layoutParameters cannot change. An existing master keeps its size. Wins over layoutParameters.horizontalSize." },
                         "paperHeight":           { "type": "number", "description": "Optional paper height in mm, used together with paperWidth. See paperWidth. Wins over layoutParameters.verticalSize." },
@@ -995,21 +985,7 @@ GS::Optional<GS::UniString> GetLayoutSubsetSettingsCommand::GetRawResponseSchema
                 "items": {
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "name":                { "type": "string" },
-                                "ownPrefix":           { "type": "string" },
-                                "customNumber":        { "type": "string" },
-                                "numberingStyle":      { "type": "string", "enum": ["Undefined", "abc", "ABC", "1", "01", "001", "0001", "noID"] },
-                                "startAt":             { "type": "integer" },
-                                "continueNumbering":   { "type": "boolean" },
-                                "useUpperPrefix":      { "type": "boolean" },
-                                "includeToIDSequence": { "type": "boolean" },
-                                "customNumbering":     { "type": "boolean" },
-                                "addOwnPrefix":        { "type": "boolean" }
-                            },
-                            "additionalProperties": false,
-                            "required": ["name", "ownPrefix", "customNumber", "numberingStyle", "startAt", "continueNumbering", "useUpperPrefix", "includeToIDSequence", "customNumbering", "addOwnPrefix"]
+                            "$ref": "#/LayoutSubsetSettings"
                         },
                         { "$ref": "#/ErrorItem" }
                     ]
@@ -2170,32 +2146,7 @@ GS::Optional<GS::UniString> GetDrawingNumberingGridLinesCommand::GetRawResponseS
                 "type": "array",
                 "description": "The lines of the grid of the grid-based drawing numbering of the current layout. Only a layout that uses grid-based drawing numbering has such a grid.",
                 "items": {
-                    "type": "object",
-                    "properties": {
-                        "begC": {
-                            "$ref": "#/Coordinate2D",
-                            "description": "The start point of the line, in layout coordinates."
-                        },
-                        "endC": {
-                            "$ref": "#/Coordinate2D",
-                            "description": "The end point of the line, in layout coordinates."
-                        },
-                        "penIndex": {
-                            "type": "integer",
-                            "description": "The index of the pen of the line."
-                        },
-                        "lineTypeIndex": {
-                            "type": "integer",
-                            "description": "The index of the line type of the line."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                        "begC",
-                        "endC",
-                        "penIndex",
-                        "lineTypeIndex"
-                    ]
+                    "$ref": "#/DrawingNumberingGridLine"
                 }
             }
         },

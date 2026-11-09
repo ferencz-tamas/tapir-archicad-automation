@@ -13,8 +13,8 @@ namespace TapirGrasshopperPlugin.Components.NavigatorComponents
         public SetCurrent3DStyleComponent()
             : base(
                 "SetCurrent3DStyle",
-                "Make the given 3D style, one of the names Get3DStyles returns, the current one, which the 3D " +
-                "window uses.",
+                "Meant to make the given 3D style, one of the names Get3DStyles returns, the current one. Not " +
+                "available yet: Archicad's API function for it crashes Archicad, so the command refuses.",
                 GroupNames.Navigator)
         {
         }
@@ -56,7 +56,7 @@ namespace TapirGrasshopperPlugin.Components.NavigatorComponents
 
         // Shares the icon of the 3D projection setter until the 3D styles get one of their own.
         protected override System.Drawing.Bitmap Icon =>
-            Properties.Resources.Set3DProjectionSettings;
+            Properties.Resources.SetCurrent3DStyle;
 
         public override Guid ComponentGuid =>
             new Guid("a616a3e3-fff8-4e6e-b6b8-73dc8f53c9b9");

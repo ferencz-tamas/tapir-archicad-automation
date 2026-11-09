@@ -1,4 +1,5 @@
 #include "NavigatorCommands.hpp"
+#include "ElementGDLParameterCommands.hpp"
 #include "MigrationHelper.hpp"
 #include "Base64Converter.hpp"
 #include "Transformation2D.hpp"
@@ -309,17 +310,7 @@ GS::Optional<GS::UniString> GetDrawingContentBoxesCommand::GetRawResponseSchema 
                 "items": {
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "contentBox": {
-                                    "$ref": "#/BoundingBox2D",
-                                    "description": "The full boundary box of the Drawing's content, independent of its frame, as returned by Archicad."
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": [
-                                "contentBox"
-                            ]
+                            "$ref": "#/DrawingContentBox"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -509,17 +500,7 @@ GS::Optional<GS::UniString> GetDatabasesCommand::GetInputParametersSchema () con
             "type": "array",
             "description": "The types of the databases to list. Optional, by default the databases of every type are listed.",
             "items": {
-                "type": "string",
-                "enum": [
-                    "Section",
-                    "Elevation",
-                    "InteriorElevation",
-                    "Detail",
-                    "Worksheet",
-                    "DocumentFrom3D",
-                    "Layout",
-                    "MasterLayout"
-                ]
+                "$ref": "#/DatabaseType"
             }
         }
     },
@@ -536,29 +517,7 @@ GS::Optional<GS::UniString> GetDatabasesCommand::GetRawResponseSchema () const
         "databases": {
             "type": "array",
             "items": {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "description": "The type of the database."
-                    },
-                    "databaseId": {
-                        "$ref": "#/DatabaseId"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "The name of the database. Missing when the database info cannot be read."
-                    },
-                    "referenceId": {
-                        "type": "string",
-                        "description": "The reference id of the database. Missing when the database info cannot be read."
-                    }
-                },
-                "additionalProperties": false,
-                "required": [
-                    "type",
-                    "databaseId"
-                ]
+                "$ref": "#/DatabaseDetails"
             }
         }
     },
@@ -724,17 +683,7 @@ GS::Optional<GS::UniString> FindModelViewOptionCommand::GetInputParametersSchema
         "description": "The model view option combination to find, given by id or by name.",
         "properties": {
             "modelViewOptionId": {
-                "type": "object",
-                "description": "The identifier of the model view option combination.",
-                "properties": {
-                    "guid": {
-                        "$ref": "#/Guid"
-                    }
-                },
-                "additionalProperties": false,
-                "required": [
-                    "guid"
-                ]
+                "$ref": "#/ModelViewOptionId"
             },
             "name": {
                 "type": "string",
@@ -768,17 +717,7 @@ GS::Optional<GS::UniString> FindModelViewOptionCommand::GetRawResponseSchema () 
                 "description": "The index of the model view option combination."
             },
             "modelViewOptionId": {
-                "type": "object",
-                "description": "The identifier of the model view option combination.",
-                "properties": {
-                    "guid": {
-                        "$ref": "#/Guid"
-                    }
-                },
-                "additionalProperties": false,
-                "required": [
-                    "guid"
-                ]
+                "$ref": "#/ModelViewOptionId"
             },
             "name": {
                 "type": "string",
@@ -813,31 +752,40 @@ GS::ObjectState FindModelViewOptionCommand::Execute (const GS::ObjectState& para
             return CreateErrorResponse (APIERR_BADPARS, "modelViewOptionId is corrupt or missing.");
         }
         searchHead.guid = guidToSearch;
-    } else if (parameters.Get ("name", nameToSearch)) {
-        searchHead.uniStringNamePtr = &nameToSearch;
-    } else {
+    } else if (!parameters.Get ("name", nameToSearch)) {
         return CreateErrorResponse (APIERR_BADPARS, "Either modelViewOptionId or name is required.");
     }
 
-    GSErrCode err = ACAPI_Navigator_ModelViewOptions_Search (&searchHead);
+    // A name is looked up by walking the combinations the way GetModelViewOptions reads them.
+    // ACAPI_Navigator_ModelViewOptions_Search does not compare the name given in
+    // uniStringNamePtr: on Archicad 29 it fails for every name, or, once the project has a
+    // combination with an empty name, returns that one for any name. The guid search is not
+    // documented, so a guid it does not find is looked up by walking as well.
+    GSErrCode err = APIERR_BADNAME;
+    if (guidToSearch != APINULLGuid) {
+        err = ACAPI_Navigator_ModelViewOptions_Search (&searchHead);
+    }
 
-    // The search is documented with the name only; when it does not find the guid, the
-    // combinations are walked through the way GetModelViewOptions reads them.
-    if (guidToSearch != APINULLGuid && (err != NoError || searchHead.guid != guidToSearch)) {
-        err = APIERR_BADID;
+    if (guidToSearch == APINULLGuid || err != NoError || searchHead.guid != guidToSearch) {
+        err = (guidToSearch != APINULLGuid) ? APIERR_BADID : APIERR_BADNAME;
 
         UInt32 count = 0;
         ACAPI_Navigator_ModelViewOptions_GetNum (count);
 
         for (UInt32 i = 1; i <= count; ++i) {
+            GS::UniString name;
             API_ModelViewOptionsType modelViewOption = {};
             modelViewOption.head.index = i;
+            modelViewOption.head.uniStringNamePtr = &name;
 
             if (ACAPI_Navigator_ModelViewOptions_Get (&modelViewOption) != NoError) {
                 continue;
             }
             ACAPI_FreeGDLModelViewOptionsPtr (&modelViewOption.modelViewOpt.gdlOptions);
-            if (modelViewOption.head.guid == guidToSearch) {
+            const bool matches = (guidToSearch != APINULLGuid)
+                ? modelViewOption.head.guid == guidToSearch
+                : name.Compare (nameToSearch, CaseInsensitive) == GS::UniString::Equal;
+            if (matches) {
                 searchHead.index = modelViewOption.head.index;
                 err = NoError;
                 break;
@@ -947,70 +895,78 @@ struct ViewOptionsReader {
     }
 };
 
+// The one list of the model view option fields shared by reading and writing, used for the current
+// window (VisitViewOptions) and for the stored combinations (GetModelViewOptionDetails). The
+// gdlOptions pointer and the fillers are left out.
+template<class Visitor>
+void VisitModelViewOptions (Visitor& v, API_ModelViewOptions& model)
+{
+    v.Number ("doorMode", model.doorMode);
+    v.Number ("windowMode", model.windowMode);
+    v.Number ("skylightMode", model.skylightMode);
+    v.Number ("sectionMarker", model.sectionMarker);
+    v.Number ("beamMethod", model.beamMethod);
+    v.Number ("roofShellMode", model.roofShellMode);
+    v.Number ("showColumnSymbol", model.showColumnSymbol);
+    v.Number ("slabMethod", model.slabMethod);
+    v.Flag ("coluHiddenlineUnderSlabs", model.coluHiddenlineUnderSlabs);
+    v.Flag ("beamHiddenlineUnderSlabs", model.beamHiddenlineUnderSlabs);
+    v.Flag ("zoneHideZoneStamp", model.zoneHideZoneStamp);
+    v.Group ("curtainWall", [&] () {
+        API_CurtainWallModelViewOptions& cw = model.curtainWallModelViewOptions;
+        v.Number ("cwFrameDetailLevel", cw.cwFrameDetailLevel);
+        v.Number ("cwPanelDetailLevel", cw.cwPanelDetailLevel);
+        v.Number ("cwJunctionDetailLevel", cw.cwJunctionDetailLevel);
+        v.Number ("cwAccessoryDetailLevel", cw.cwAccessoryDetailLevel);
+    });
+    v.Group ("stair", [&] () {
+        API_StairModelViewOptions& stair = model.stairModelViewOptions;
+        v.Number ("stair3DDetailLevel", stair.stair3DDetailLevel);
+        v.Number ("stairFloorPlanVisualization", stair.stairFloorPlanVisualization);
+        v.Flag ("showStairHeadroom", stair.showStairHeadroom);
+        v.Flag ("stairFloorPlanCompWalkingLine", stair.stairFloorPlanCompWalkingLine);
+        v.Flag ("stairFloorPlanCompNumbering", stair.stairFloorPlanCompNumbering);
+        v.Flag ("stairFloorPlanCompUPDOWNText", stair.stairFloorPlanCompUPDOWNText);
+        v.Flag ("stairFloorPlanCompDescription", stair.stairFloorPlanCompDescription);
+        v.Flag ("stairFloorPlanCompTreadAccessories", stair.stairFloorPlanCompTreadAccessories);
+        v.Flag ("stairFloorPlanCompStructureBeamSupport", stair.stairFloorPlanCompStructureBeamSupport);
+        v.Flag ("stairFloorPlanCompStructureStringers", stair.stairFloorPlanCompStructureStringers);
+        v.Flag ("stairFloorPlanCompStructureCantilevered", stair.stairFloorPlanCompStructureCantilevered);
+        v.Flag ("stairReflectedCompWalkingLine", stair.stairReflectedCompWalkingLine);
+        v.Flag ("stairReflectedCompDescription", stair.stairReflectedCompDescription);
+        v.Flag ("stairReflectedCompStructureBeamSupport", stair.stairReflectedCompStructureBeamSupport);
+        v.Flag ("stairReflectedCompStructureStringers", stair.stairReflectedCompStructureStringers);
+        v.Flag ("stairReflectedCompStructureCantilevered", stair.stairReflectedCompStructureCantilevered);
+        v.Attribute ("stairSchemeSurfaceIndex", stair.stairSchemeSurfaceIndex);
+        v.Attribute ("stairSchemeCutLineIndex", stair.stairSchemeCutLineIndex);
+        v.Number ("stairSchemeCutLinePenIndex", stair.stairSchemeCutLinePenIndex);
+        v.Attribute ("stairSchemeUncutLineIndex", stair.stairSchemeUncutLineIndex);
+        v.Number ("stairSchemeUncutLinePenIndex", stair.stairSchemeUncutLinePenIndex);
+    });
+    v.Group ("railing", [&] () {
+        API_RailingModelViewOptions& railing = model.railingModelViewOptions;
+        v.Number ("railing3DDetailLevel", railing.railing3DDetailLevel);
+        v.Flag ("railing2DDisplayCompPosts", railing.railing2DDisplayCompPosts);
+        v.Flag ("railing2DDisplayCompTopRail", railing.railing2DDisplayCompTopRail);
+        v.Flag ("railing2DDisplayCompHandrails", railing.railing2DDisplayCompHandrails);
+        v.Flag ("railing2DDisplayCompRails", railing.railing2DDisplayCompRails);
+        v.Flag ("railing2DDisplayCompInnerPosts", railing.railing2DDisplayCompInnerPosts);
+        v.Flag ("railing2DDisplayCompBalusters", railing.railing2DDisplayCompBalusters);
+        v.Flag ("railing2DDisplayCompPanels", railing.railing2DDisplayCompPanels);
+        v.Attribute ("railingSchemeSurfaceIndex", railing.railingSchemeSurfaceIndex);
+        v.Attribute ("railingSchemeCutLineIndex", railing.railingSchemeCutLineIndex);
+        v.Number ("railingSchemeCutLinePenIndex", railing.railingSchemeCutLinePenIndex);
+        v.Attribute ("railingSchemeUncutLineIndex", railing.railingSchemeUncutLineIndex);
+        v.Number ("railingSchemeUncutLinePenIndex", railing.railingSchemeUncutLinePenIndex);
+    });
+}
+
 // The one list of fields shared by reading and writing. The gdlOptions pointer and the fillers are left out.
 template<class Visitor>
 void VisitViewOptions (Visitor& v, API_ViewOptions& viewOptions)
 {
-    API_ModelViewOptions& model = viewOptions.modelViewOpt;
     v.Group ("modelViewOptions", [&] () {
-        v.Number ("doorMode", model.doorMode);
-        v.Number ("windowMode", model.windowMode);
-        v.Number ("skylightMode", model.skylightMode);
-        v.Number ("sectionMarker", model.sectionMarker);
-        v.Number ("beamMethod", model.beamMethod);
-        v.Number ("roofShellMode", model.roofShellMode);
-        v.Number ("showColumnSymbol", model.showColumnSymbol);
-        v.Number ("slabMethod", model.slabMethod);
-        v.Flag ("coluHiddenlineUnderSlabs", model.coluHiddenlineUnderSlabs);
-        v.Flag ("beamHiddenlineUnderSlabs", model.beamHiddenlineUnderSlabs);
-        v.Flag ("zoneHideZoneStamp", model.zoneHideZoneStamp);
-        v.Group ("curtainWall", [&] () {
-            API_CurtainWallModelViewOptions& cw = model.curtainWallModelViewOptions;
-            v.Number ("cwFrameDetailLevel", cw.cwFrameDetailLevel);
-            v.Number ("cwPanelDetailLevel", cw.cwPanelDetailLevel);
-            v.Number ("cwJunctionDetailLevel", cw.cwJunctionDetailLevel);
-            v.Number ("cwAccessoryDetailLevel", cw.cwAccessoryDetailLevel);
-        });
-        v.Group ("stair", [&] () {
-            API_StairModelViewOptions& stair = model.stairModelViewOptions;
-            v.Number ("stair3DDetailLevel", stair.stair3DDetailLevel);
-            v.Number ("stairFloorPlanVisualization", stair.stairFloorPlanVisualization);
-            v.Flag ("showStairHeadroom", stair.showStairHeadroom);
-            v.Flag ("stairFloorPlanCompWalkingLine", stair.stairFloorPlanCompWalkingLine);
-            v.Flag ("stairFloorPlanCompNumbering", stair.stairFloorPlanCompNumbering);
-            v.Flag ("stairFloorPlanCompUPDOWNText", stair.stairFloorPlanCompUPDOWNText);
-            v.Flag ("stairFloorPlanCompDescription", stair.stairFloorPlanCompDescription);
-            v.Flag ("stairFloorPlanCompTreadAccessories", stair.stairFloorPlanCompTreadAccessories);
-            v.Flag ("stairFloorPlanCompStructureBeamSupport", stair.stairFloorPlanCompStructureBeamSupport);
-            v.Flag ("stairFloorPlanCompStructureStringers", stair.stairFloorPlanCompStructureStringers);
-            v.Flag ("stairFloorPlanCompStructureCantilevered", stair.stairFloorPlanCompStructureCantilevered);
-            v.Flag ("stairReflectedCompWalkingLine", stair.stairReflectedCompWalkingLine);
-            v.Flag ("stairReflectedCompDescription", stair.stairReflectedCompDescription);
-            v.Flag ("stairReflectedCompStructureBeamSupport", stair.stairReflectedCompStructureBeamSupport);
-            v.Flag ("stairReflectedCompStructureStringers", stair.stairReflectedCompStructureStringers);
-            v.Flag ("stairReflectedCompStructureCantilevered", stair.stairReflectedCompStructureCantilevered);
-            v.Attribute ("stairSchemeSurfaceIndex", stair.stairSchemeSurfaceIndex);
-            v.Attribute ("stairSchemeCutLineIndex", stair.stairSchemeCutLineIndex);
-            v.Number ("stairSchemeCutLinePenIndex", stair.stairSchemeCutLinePenIndex);
-            v.Attribute ("stairSchemeUncutLineIndex", stair.stairSchemeUncutLineIndex);
-            v.Number ("stairSchemeUncutLinePenIndex", stair.stairSchemeUncutLinePenIndex);
-        });
-        v.Group ("railing", [&] () {
-            API_RailingModelViewOptions& railing = model.railingModelViewOptions;
-            v.Number ("railing3DDetailLevel", railing.railing3DDetailLevel);
-            v.Flag ("railing2DDisplayCompPosts", railing.railing2DDisplayCompPosts);
-            v.Flag ("railing2DDisplayCompTopRail", railing.railing2DDisplayCompTopRail);
-            v.Flag ("railing2DDisplayCompHandrails", railing.railing2DDisplayCompHandrails);
-            v.Flag ("railing2DDisplayCompRails", railing.railing2DDisplayCompRails);
-            v.Flag ("railing2DDisplayCompInnerPosts", railing.railing2DDisplayCompInnerPosts);
-            v.Flag ("railing2DDisplayCompBalusters", railing.railing2DDisplayCompBalusters);
-            v.Flag ("railing2DDisplayCompPanels", railing.railing2DDisplayCompPanels);
-            v.Attribute ("railingSchemeSurfaceIndex", railing.railingSchemeSurfaceIndex);
-            v.Attribute ("railingSchemeCutLineIndex", railing.railingSchemeCutLineIndex);
-            v.Number ("railingSchemeCutLinePenIndex", railing.railingSchemeCutLinePenIndex);
-            v.Attribute ("railingSchemeUncutLineIndex", railing.railingSchemeUncutLineIndex);
-            v.Number ("railingSchemeUncutLinePenIndex", railing.railingSchemeUncutLinePenIndex);
-        });
+        VisitModelViewOptions (v, viewOptions.modelViewOpt);
     });
 
     API_OnScreenViewOptions& screen = viewOptions.onScreenViewOpt;
@@ -1048,6 +1004,295 @@ void DisposeViewOptions (API_ViewOptions& viewOptions)
 
 }
 
+GetModelViewOptionDetailsCommand::GetModelViewOptionDetailsCommand () :
+    CommandBase (CommonSchema::Used)
+{}
+
+GS::String GetModelViewOptionDetailsCommand::GetName () const
+{
+    return "GetModelViewOptionDetails";
+}
+
+GS::Optional<GS::UniString> GetModelViewOptionDetailsCommand::GetInputParametersSchema () const
+{
+    return R"({
+    "type": "object",
+    "properties": {
+        "modelViewOptions": {
+            "type": "array",
+            "description": "The model view option combinations to read, each given by id or by name. When omitted, every combination of the project is returned.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "modelViewOptionId": {
+                        "type": "object",
+                        "description": "The identifier of the model view option combination (see FindModelViewOption).",
+                        "properties": {
+                            "guid": {
+                                "$ref": "#/Guid"
+                            }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                            "guid"
+                        ]
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The name of the model view option combination, as shown in Document > Model View > Model View Options."
+                    }
+                },
+                "additionalProperties": false,
+                "oneOf": [
+                    {
+                        "required": [
+                            "modelViewOptionId"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "name"
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "additionalProperties": false
+})";
+}
+
+GS::Optional<GS::UniString> GetModelViewOptionDetailsCommand::GetRawResponseSchema () const
+{
+    return R"({
+    "type": "object",
+    "properties": {
+        "modelViewOptionDetails": {
+            "type": "array",
+            "description": "The settings of each model view option combination, in the order of the input, or in the order of the project when no input is given.",
+            "items": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "index": {
+                                "type": "integer",
+                                "description": "The index of the model view option combination, the one SetViewOptions takes as modelViewOptionIndex."
+                            },
+                            "modelViewOptionId": {
+                                "$ref": "#/ModelViewOptionId"
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "The name of the model view option combination."
+                            },
+                            "modelViewOptions": {
+                                "type": "object",
+                                "description": "The fields of API_ModelViewOptions stored in the combination, with the curtainWall, stair and railing parts as nested objects: the same fields as viewOptions.modelViewOptions of GetViewOptions. Values are the numeric API constants; attribute indices are plain integers.",
+                                "additionalProperties": true
+                            },
+                            "gdlOptions": {
+                                "type": "array",
+                                "description": "The model view options that library parts add to the combination (the library part settings of the Model View Options dialog, e.g. of doors, windows and objects), with their GDL parameter values.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "The name of the option set, e.g. the name of the library global settings part."
+                                        },
+                                        "guid": {
+                                            "type": "object",
+                                            "description": "The unique id of the option set.",
+                                            "properties": {
+                                                "guid": {
+                                                    "$ref": "#/Guid"
+                                                }
+                                            },
+                                            "additionalProperties": false,
+                                            "required": [
+                                                "guid"
+                                            ]
+                                        },
+                                        "supersetGuid": {
+                                            "type": "object",
+                                            "description": "The id of another option set that has all of the functionality of this one. When it is given, this set is filled but not shown in the Model View Options dialog.",
+                                            "properties": {
+                                                "guid": {
+                                                    "$ref": "#/Guid"
+                                                }
+                                            },
+                                            "additionalProperties": false,
+                                            "required": [
+                                                "guid"
+                                            ]
+                                        },
+                                        "parameters": {
+                                            "type": "array",
+                                            "description": "The GDL parameters of the option set with their values in this combination.",
+                                            "items": {
+                                                "$ref": "#/StoredGDLParameter"
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "name",
+                                        "guid",
+                                        "parameters"
+                                    ]
+                                }
+                            }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                            "index",
+                            "modelViewOptionId",
+                            "name",
+                            "modelViewOptions",
+                            "gdlOptions"
+                        ]
+                    },
+                    {
+                        "$ref": "#/ErrorItem"
+                    }
+                ]
+            }
+        }
+    },
+    "additionalProperties": false,
+    "required": [
+        "modelViewOptionDetails"
+    ]
+})";
+}
+
+#ifdef ServerMainVers_2700
+
+namespace {
+
+struct StoredModelViewOption {
+    API_Guid        guid = APINULLGuid;
+    GS::UniString   name;
+    GS::ObjectState details;
+};
+
+// Serializes a combination read with ACAPI_Navigator_ModelViewOptions_Get. The gdlOptions array
+// (a GSPtr, sized as the DevKit's Environment_Control example sizes it) and the parameter handles
+// in it stay owned by the caller, who frees them with ACAPI_FreeGDLModelViewOptionsPtr.
+GS::ObjectState CreateModelViewOptionDetails (API_ModelViewOptionsType& modelViewOption, const GS::UniString& name)
+{
+    GS::ObjectState details;
+    details.Add ("index", static_cast<Int32> (modelViewOption.head.index));
+    details.Add ("modelViewOptionId", CreateGuidObjectState (modelViewOption.head.guid));
+    details.Add ("name", name);
+
+    GS::ObjectState modelViewOptionsOS;
+    ViewOptionsWriter writer { &modelViewOptionsOS };
+    VisitModelViewOptions (writer, modelViewOption.modelViewOpt);
+    details.Add ("modelViewOptions", modelViewOptionsOS);
+
+    const auto& gdlOptionsAdder = details.AddList<GS::ObjectState> ("gdlOptions");
+    const API_GDLModelViewOptions* gdlOptions = modelViewOption.modelViewOpt.gdlOptions;
+    const GSSize nGdlOptions = gdlOptions != nullptr ? BMGetPtrSize (reinterpret_cast<GSConstPtr> (gdlOptions)) / sizeof (API_GDLModelViewOptions) : 0;
+    for (GSSize i = 0; i < nGdlOptions; ++i) {
+        const API_GDLModelViewOptions& gdlOption = gdlOptions[i];
+        GS::ObjectState gdlOptionOS;
+        gdlOptionOS.Add ("name", GS::UniString (gdlOption.name));
+        gdlOptionOS.Add ("guid", CreateGuidObjectState (gdlOption.guid));
+        if (gdlOption.supersetGuid != APINULLGuid) {
+            gdlOptionOS.Add ("supersetGuid", CreateGuidObjectState (gdlOption.supersetGuid));
+        }
+        // Without a library part index only "parameters" is added, as for the parameters of a Favorite.
+        AddLibPartAndGDLParameters (gdlOptionOS, 0, gdlOption.params);
+        gdlOptionsAdder (gdlOptionOS);
+    }
+    return details;
+}
+
+}
+
+#endif
+
+GS::ObjectState GetModelViewOptionDetailsCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
+{
+#ifdef ServerMainVers_2700
+    // Every combination is read once by its index, the way GetModelViewOptions reads them.
+    GS::Array<StoredModelViewOption> storedOptions;
+    UInt32 count = 0;
+    ACAPI_Navigator_ModelViewOptions_GetNum (count);
+    for (UInt32 i = 1; i <= count; ++i) {
+        GS::UniString name;
+        API_ModelViewOptionsType modelViewOption = {};
+        modelViewOption.head.index = i;
+        modelViewOption.head.uniStringNamePtr = &name;
+
+        if (ACAPI_Navigator_ModelViewOptions_Get (&modelViewOption) != NoError) {
+            continue;
+        }
+        StoredModelViewOption storedOption;
+        storedOption.guid = modelViewOption.head.guid;
+        storedOption.name = name;
+        storedOption.details = CreateModelViewOptionDetails (modelViewOption, name);
+        ACAPI_FreeGDLModelViewOptionsPtr (&modelViewOption.modelViewOpt.gdlOptions);
+        storedOptions.Push (storedOption);
+    }
+
+    GS::ObjectState response;
+    const auto& detailsAdder = response.AddList<GS::ObjectState> ("modelViewOptionDetails");
+
+    GS::Array<GS::ObjectState> requested;
+    if (!parameters.Get ("modelViewOptions", requested)) {
+        for (const StoredModelViewOption& storedOption : storedOptions) {
+            detailsAdder (storedOption.details);
+        }
+        return response;
+    }
+
+    for (const GS::ObjectState& item : requested) {
+        API_Guid guidToFind = APINULLGuid;
+        GS::UniString nameToFind;
+        const GS::ObjectState* modelViewOptionIdOS = item.Get ("modelViewOptionId");
+        if (modelViewOptionIdOS != nullptr) {
+            guidToFind = GetGuidFromObjectState (*modelViewOptionIdOS);
+            if (guidToFind == APINULLGuid) {
+                detailsAdder (CreateErrorResponse (APIERR_BADPARS, "modelViewOptionId is corrupt or missing."));
+                continue;
+            }
+        } else if (!item.Get ("name", nameToFind)) {
+            detailsAdder (CreateErrorResponse (APIERR_BADPARS, "Either modelViewOptionId or name is required."));
+            continue;
+        }
+
+        const StoredModelViewOption* found = nullptr;
+        for (const StoredModelViewOption& storedOption : storedOptions) {
+            const bool matches = (guidToFind != APINULLGuid)
+                ? storedOption.guid == guidToFind
+                : storedOption.name.Compare (nameToFind, CaseInsensitive) == GS::UniString::Equal;
+            if (matches) {
+                found = &storedOption;
+                break;
+            }
+        }
+
+        if (found == nullptr) {
+            if (guidToFind != APINULLGuid) {
+                detailsAdder (CreateErrorResponse (APIERR_BADID, "No model view option combination has the given modelViewOptionId."));
+            } else {
+                detailsAdder (CreateErrorResponse (APIERR_BADNAME, "No model view option combination is named '" + nameToFind + "'."));
+            }
+            continue;
+        }
+        detailsAdder (found->details);
+    }
+
+    return response;
+#else
+    (void) parameters;
+    return CreateErrorResponse (APIERR_NOTSUPPORTED, "Available from Archicad 27.");
+#endif
+}
+
 // Defined at CreateViewsInViewMap below; frees what ACAPI_Navigator_GetNavigatorView allocates.
 static void FreeNavigatorView (API_NavigatorView& navigatorView);
 
@@ -1067,36 +1312,56 @@ GS::Optional<GS::UniString> GetViewOptionsCommand::GetRawResponseSchema () const
     "properties": {
         "modelViewOptionIndex": {
             "type": "integer",
-            "description": "The index of the model view option combination the window applies. Matches the order of GetModelViewOptions, starting from 1."
+            "description": "The index of the model view option combination the window applies, 0 when its options are not a stored combination (Custom). It is the index FindModelViewOption and GetModelViewOptionDetails return, which is not always the position in the list of GetModelViewOptions."
+        },
+        "modelViewOptionName": {
+            "type": "string",
+            "description": "The name of that combination, empty when there is none. Archicad may renumber the combinations when the view options of a window change, so look the index up by this name (FindModelViewOption) before switching back to it with SetViewOptions."
         },
         "viewOptions": {
-            "type": "object",
-            "description": "The model view options and the on-screen view options, every field by its API_ViewOptions name. Values are the numeric API constants; attribute indices are plain integers.",
-            "properties": {
-                "modelViewOptions": {
-                    "type": "object",
-                    "description": "Fields of API_ModelViewOptions, with the curtainWall, stair and railing parts as nested objects.",
-                    "additionalProperties": true
-                },
-                "onScreenViewOptions": {
-                    "type": "object",
-                    "description": "Fields of API_OnScreenViewOptions.",
-                    "additionalProperties": true
-                }
-            },
-            "additionalProperties": false,
-            "required": [
-                "modelViewOptions",
-                "onScreenViewOptions"
-            ]
+            "$ref": "#/ViewOptions"
         }
     },
     "additionalProperties": false,
     "required": [
         "modelViewOptionIndex",
+        "modelViewOptionName",
         "viewOptions"
     ]
 })";
+}
+
+namespace {
+
+// The name of the model view option combination with the given index, read the way
+// GetModelViewOptions reads them; empty when there is no such combination.
+GS::UniString GetModelViewOptionName (short index)
+{
+    GS::UniString name;
+    if (index <= 0) {
+        return name;
+    }
+#ifdef ServerMainVers_2700
+    API_ModelViewOptionsType modelViewOption = {};
+    modelViewOption.head.index = index;
+    modelViewOption.head.uniStringNamePtr = &name;
+    if (ACAPI_Navigator_ModelViewOptions_Get (&modelViewOption) != NoError) {
+        return GS::UniString ();
+    }
+    ACAPI_FreeGDLModelViewOptionsPtr (&modelViewOption.modelViewOpt.gdlOptions);
+#else
+    API_Attribute attr = {};
+    attr.header.typeID = API_ModelViewOptionsID;
+    attr.header.index = index;
+    attr.header.uniStringNamePtr = &name;
+    if (ACAPI_Attribute_Get (&attr) != NoError) {
+        return GS::UniString ();
+    }
+    ACAPI_FreeGDLModelViewOptionsPtr (&attr.modelViewOpt.modelViewOpt.gdlOptions);
+#endif
+    return name;
+}
+
 }
 
 GS::ObjectState GetViewOptionsCommand::Execute (const GS::ObjectState& /*parameters*/, GS::ProcessControl& /*processControl*/) const
@@ -1116,6 +1381,7 @@ GS::ObjectState GetViewOptionsCommand::Execute (const GS::ObjectState& /*paramet
 
     GS::ObjectState response;
     response.Add ("modelViewOptionIndex", (Int32) modelViewOptionIndex);
+    response.Add ("modelViewOptionName", GetModelViewOptionName (modelViewOptionIndex));
     response.Add ("viewOptions", viewOptionsOS);
     return response;
 }
@@ -1136,23 +1402,11 @@ GS::Optional<GS::UniString> SetViewOptionsCommand::GetInputParametersSchema () c
     "properties": {
         "modelViewOptionIndex": {
             "type": "integer",
-            "description": "Switches the window to the model view option combination with this index (see GetModelViewOptions, starting from 1). Without viewOptions only the combination is switched.",
+            "description": "Switches the window to the model view option combination with this index, as GetViewOptions, FindModelViewOption and GetModelViewOptionDetails return it. Archicad then applies the model view options stored in the combination: viewOptions.modelViewOptions are not applied together with an index, viewOptions.onScreenViewOptions are. Archicad may renumber the combinations when the view options of a window change, so look the index up by name with FindModelViewOption right before switching.",
             "minimum": 1
         },
         "viewOptions": {
-            "type": "object",
-            "description": "The fields to change, named as in the response of GetViewOptions. Fields not given keep their current value.",
-            "properties": {
-                "modelViewOptions": {
-                    "type": "object",
-                    "additionalProperties": true
-                },
-                "onScreenViewOptions": {
-                    "type": "object",
-                    "additionalProperties": true
-                }
-            },
-            "additionalProperties": false
+            "$ref": "#/ViewOptionsUpdate"
         }
     },
     "additionalProperties": false
@@ -1170,25 +1424,26 @@ GS::ObjectState SetViewOptionsCommand::Execute (const GS::ObjectState& parameter
     }
 
     short modelViewOptionIndex = (short) requestedIndex;
-    GSErrCode err = NoError;
 
-    if (viewOptionsOS == nullptr) {
-        err = ACAPI_Navigator_ChangeViewOptions (nullptr, &modelViewOptionIndex);
-    } else {
-        API_ViewOptions viewOptions = {};
-        short currentIndex = 0;
-        err = ACAPI_Navigator_GetViewOptions (&viewOptions, &currentIndex);
-        if (err != NoError) {
-            DisposeViewOptions (viewOptions);
-            return CreateErrorResponse (err, "Failed to get the view options. Is a plan window open?");
-        }
+    // ACAPI_Navigator_ChangeViewOptions needs the options also when only the combination is
+    // switched: up to Archicad 29 a null pointer fails with APIERR_BADPARS. So the current
+    // options are passed, with the given fields changed. With an index, Archicad applies the
+    // model view options stored in the combination and takes the on-screen options passed.
+    API_ViewOptions viewOptions = {};
+    short currentIndex = 0;
+    GSErrCode err = ACAPI_Navigator_GetViewOptions (&viewOptions, &currentIndex);
+    if (err != NoError) {
+        DisposeViewOptions (viewOptions);
+        return CreateErrorResponse (err, "Failed to get the view options. Is a plan window open?");
+    }
 
+    if (viewOptionsOS != nullptr) {
         ViewOptionsReader reader { viewOptionsOS };
         VisitViewOptions (reader, viewOptions);
-
-        err = ACAPI_Navigator_ChangeViewOptions (&viewOptions, switchCombination ? &modelViewOptionIndex : nullptr);
-        DisposeViewOptions (viewOptions);
     }
+
+    err = ACAPI_Navigator_ChangeViewOptions (&viewOptions, switchCombination ? &modelViewOptionIndex : nullptr);
+    DisposeViewOptions (viewOptions);
 
     if (err != NoError) {
         return CreateErrorResponse (err, "Failed to change the view options. Check the model view option index and that a plan window is open.");
@@ -1474,6 +1729,21 @@ GS::ObjectState SetViewSettingsCommand::Execute (const GS::ObjectState& paramete
             navigatorView.tr.tmx[11] = 0.0;
         }
 
+        // Optional: the translation part of the view transformation (tmx[3], tmx[7]), which
+        // "rotation" above leaves as it is. A view oriented by hand (or created from a story
+        // oriented by hand) carries a translation, and the Drawings placed from it are shifted
+        // by it; writing it lets a caller give a view exactly the transformation of another one
+        // (read through transformationMatrix), or clear it with {x: 0, y: 0}.
+        const GS::ObjectState* translationOS = viewSettingsOS->Get ("translation");
+        if (translationOS != nullptr) {
+            double tx = 0.0;
+            double ty = 0.0;
+            if (translationOS->Get ("x", tx) && translationOS->Get ("y", ty)) {
+                navigatorView.tr.tmx[3] = tx;
+                navigatorView.tr.tmx[7] = ty;
+            }
+        }
+
         GS::UniString structureDisplayStr;
         if (viewSettingsOS->Get ("structureDisplay", structureDisplayStr)) {
             if      (structureDisplayStr == "CoreOnly")         navigatorView.structureDisplay = API_CoreOnly;
@@ -1756,22 +2026,7 @@ GS::Optional<GS::UniString> GetRenovationFiltersCommand::GetRawResponseSchema ()
             "type": "array",
             "description": "Every renovation filter of the project.",
             "items": {
-                "type": "object",
-                "properties": {
-                    "renovationFilterId": {
-                        "$ref": "#/GuidId",
-                        "description": "Identifier of the renovation filter. The same identifier is the renovationFilterGuid of GetViewSettings and SetViewSettings."
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the renovation filter."
-                    }
-                },
-                "additionalProperties": false,
-                "required": [
-                    "renovationFilterId",
-                    "name"
-                ]
+                "$ref": "#/RenovationFilterDetails"
             }
         },
         "activeRenovationFilterId": {
@@ -2257,7 +2512,7 @@ static bool StringToStructureDisplay (const GS::UniString& str, API_StructureDis
 #endif
 
 GetStructureDisplayCommand::GetStructureDisplayCommand () :
-    CommandBase (CommonSchema::NotUsed)
+    CommandBase (CommonSchema::Used)
 {}
 
 GS::String GetStructureDisplayCommand::GetName () const
@@ -2272,9 +2527,7 @@ GS::Optional<GS::UniString> GetStructureDisplayCommand::GetRawResponseSchema () 
         "description": "The Partial Structure Display of the current window.",
         "properties": {
             "structureDisplay": {
-                "type": "string",
-                "description": "The Partial Structure Display mode of the current window.",
-                "enum": ["EntireStructure", "CoreOnly", "WithoutFinishes", "StructureOnly"]
+                "$ref": "#/PartialStructureDisplay"
             },
             "is3D": {
                 "type": "boolean",
@@ -2321,9 +2574,7 @@ GS::Optional<GS::UniString> SetStructureDisplayCommand::GetInputParametersSchema
         "type": "object",
         "properties": {
             "structureDisplay": {
-                "type": "string",
-                "description": "The Partial Structure Display mode to apply to the current window.",
-                "enum": ["EntireStructure", "CoreOnly", "WithoutFinishes", "StructureOnly"]
+                "$ref": "#/PartialStructureDisplay"
             }
         },
         "additionalProperties": false,
@@ -4137,7 +4388,11 @@ GS::Optional<GS::UniString> DeleteNavigatorItemsCommand::GetInputParametersSchem
     return R"({
         "type": "object",
         "properties": {
-            "navigatorItemIds": { "$ref": "#/NavigatorItemIds" }
+            "navigatorItemIds": { "$ref": "#/NavigatorItemIds" },
+            "dryRun": {
+                "type": "boolean",
+                "description": "If true, nothing is deleted: each execution result says what the deletion would do for that item, from the checks made before deleting (corrupt id, item not found, layout subset, View Map folder that is not empty). Archicad can still refuse an item that passes them: a Project Map item other than an independent worksheet, detail or viewpoint created by the Tapir Add-On, a marker-linked worksheet or detail, or in a Teamwork project an item that is not reserved. Default is false."
+            }
         },
         "additionalProperties": false,
         "required": ["navigatorItemIds"]
@@ -4179,6 +4434,7 @@ static bool IsProjectMapWorksheetOrDetail (const API_Guid& guid, const API_Navig
 }
 
 static GS::UniString NavigatorItemTypeToString (API_NavigatorItemTypeID t);
+static bool GetNavigatorChildren (const API_Guid& parentGuid, GS::Array<API_NavigatorItem>& children);
 
 GS::ObjectState DeleteNavigatorItemsCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl& /*processControl*/) const
 {
@@ -4193,6 +4449,8 @@ GS::ObjectState DeleteNavigatorItemsCommand::Execute (const GS::ObjectState& par
 
     GS::Array<GS::ObjectState> navigatorItemIds;
     parameters.Get ("navigatorItemIds", navigatorItemIds);
+    bool dryRun = false;
+    parameters.Get ("dryRun", dryRun);
 
     API_ProjectInfo projectInfo = {};
     const bool isTeamwork = ACAPI_ProjectOperation_Project (&projectInfo) == NoError && projectInfo.teamwork;
@@ -4216,15 +4474,21 @@ GS::ObjectState DeleteNavigatorItemsCommand::Execute (const GS::ObjectState& par
 
         GSErrCode err = NoError;
         GS::UniString failureMessage = "Failed to delete navigator item.";
+        // With dryRun only the checks made before the delete calls are run; the
+        // calls themselves are skipped.
         if (navItem.itemType == API_LayoutNavItem || navItem.itemType == API_MasterLayoutNavItem) {
-            API_DatabaseInfo dbInfo = navItem.db;
-            err = ACAPI_Database_DeleteDatabase (&dbInfo);
+            if (!dryRun) {
+                API_DatabaseInfo dbInfo = navItem.db;
+                err = ACAPI_Database_DeleteDatabase (&dbInfo);
+            }
         } else if (IsProjectMapWorksheetOrDetail (guid, navItem)) {
             // Only independent worksheets and details are databases of their
             // own; one placed by a marker belongs to its marker and cannot be
             // deleted this way.
-            API_DatabaseInfo dbInfo = navItem.db;
-            err = ACAPI_Database_DeleteDatabase (&dbInfo);
+            if (!dryRun) {
+                API_DatabaseInfo dbInfo = navItem.db;
+                err = ACAPI_Database_DeleteDatabase (&dbInfo);
+            }
             failureMessage = "Failed to delete the worksheet or detail. Only independent worksheets and details can be deleted; delete a marker-linked one by deleting its marker.";
         } else if (navItem.itemType == API_SubSetNavItem) {
             err = APIERR_NOTSUPPORTED;
@@ -4232,8 +4496,17 @@ GS::ObjectState DeleteNavigatorItemsCommand::Execute (const GS::ObjectState& par
             // ACAPI_Navigator_DeleteNavigatorVPItem deletes only the viewpoints of this
             // add-on (CreateAddOnViewpoints) and answers APIERR_BADID for any other one;
             // the API cannot delete Archicad's own Project Map viewpoints.
-            err = ACAPI_Navigator_DeleteNavigatorVPItem (&guid);
+            if (!dryRun) {
+                err = ACAPI_Navigator_DeleteNavigatorVPItem (&guid);
+            }
             failureMessage = "Failed to delete the Project Map viewpoint. Only the viewpoints the Tapir Add-On created (CreateAddOnViewpoints) can be deleted; Archicad's own Project Map items, such as schedules, cannot be deleted through the API.";
+        } else if (dryRun) {
+            // ACAPI_Navigator_DeleteNavigatorView refuses a View Map folder that
+            // still holds items with APIERR_NOTSUPPORTED (see below).
+            GS::Array<API_NavigatorItem> children;
+            if (navItem.itemType == API_FolderNavItem && GetNavigatorChildren (guid, children) && !children.IsEmpty ()) {
+                err = APIERR_NOTSUPPORTED;
+            }
         } else {
             bool silentMode = true;
             err = ACAPI_Navigator_DeleteNavigatorView (&guid, &silentMode);
@@ -4261,6 +4534,10 @@ GS::ObjectState DeleteNavigatorItemsCommand::Execute (const GS::ObjectState& par
         }
         if (err != NoError) {
             executionResults (CreateFailedExecutionResult (err, failureMessage));
+            continue;
+        }
+        if (dryRun) {
+            executionResults (CreateSuccessfulExecutionResult ());
             continue;
         }
 
@@ -4712,6 +4989,118 @@ GS::ObjectState GetNavigatorItemTreeCommand::Execute (const GS::ObjectState& par
     return response;
 }
 
+// ─── GetSchedules ─────────────────────────────────────────────────────────────
+
+// Collects the Interactive Schedules (API_ScheduleNavItem) below the given
+// Project Map item, depth first in navigator order. folderPath holds the names
+// of the items between the Project Map root and the schedule. The API does not
+// tell an element, component or surface schedule apart, so the folder path is
+// the only hint of the kind.
+static void CollectSchedules (API_NavigatorItem item, const GS::Array<GS::UniString>& folderPath, GS::Array<GS::ObjectState>& schedules)
+{
+    item.mapId = API_ProjectMap;
+
+    GS::Array<API_NavigatorItem> children;
+    if (ACAPI_Navigator_GetNavigatorChildrenItems (&item, &children) != NoError) {
+        return;
+    }
+
+    for (const API_NavigatorItem& child : children) {
+        if (child.itemType == API_ScheduleNavItem) {
+            GS::ObjectState scheduleOS;
+            scheduleOS.Add ("navigatorItemId", CreateGuidObjectState (child.guid));
+            scheduleOS.Add ("name", GS::UniString (child.uName));
+            scheduleOS.Add ("uiId", GS::UniString (child.uiId));
+            const auto& folderPathList = scheduleOS.AddList<GS::UniString> ("folderPath");
+            for (const GS::UniString& folderName : folderPath) {
+                folderPathList (folderName);
+            }
+            schedules.Push (scheduleOS);
+            continue;
+        }
+
+        GS::Array<GS::UniString> childFolderPath = folderPath;
+        childFolderPath.Push (GS::UniString (child.uName));
+        CollectSchedules (child, childFolderPath, schedules);
+    }
+}
+
+GetSchedulesCommand::GetSchedulesCommand () :
+    CommandBase (CommonSchema::Used)
+{}
+
+GS::String GetSchedulesCommand::GetName () const
+{
+    return "GetSchedules";
+}
+
+GS::Optional<GS::UniString> GetSchedulesCommand::GetRawResponseSchema () const
+{
+    return R"({
+        "type": "object",
+        "properties": {
+            "schedules": {
+                "type": "array",
+                "description": "The Interactive Schedules of the Project Map, in navigator order.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "navigatorItemId": {
+                            "$ref": "#/NavigatorItemId"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the schedule."
+                        },
+                        "uiId": {
+                            "type": "string",
+                            "description": "The ID of the schedule, shown before its name in the navigator."
+                        },
+                        "folderPath": {
+                            "type": "array",
+                            "description": "The names of the Project Map items the schedule is in, from the top down, without the project itself (e.g. Schedules, Element). Archicad's API does not say whether a schedule lists elements, components or surfaces; the default Project Map shows it by these folders.",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["navigatorItemId", "name", "uiId", "folderPath"]
+                }
+            }
+        },
+        "additionalProperties": false,
+        "required": ["schedules"]
+    })";
+}
+
+GS::ObjectState GetSchedulesCommand::Execute (const GS::ObjectState& /*parameters*/, GS::ProcessControl& /*processControl*/) const
+{
+    API_NavigatorSet navSet = {};
+    navSet.mapId = API_ProjectMap;
+    Int32 idx = 0;
+    GSErrCode err = ACAPI_Navigator_GetNavigatorSet (&navSet, &idx);
+    if (err != NoError) {
+        return CreateErrorResponse (err, "Failed to get the Project Map.");
+    }
+
+    API_NavigatorItem rootItem = {};
+    err = ACAPI_Navigator_GetNavigatorItem (&navSet.rootGuid, &rootItem);
+    if (err != NoError) {
+        return CreateErrorResponse (err, "Failed to get the root of the Project Map.");
+    }
+
+    GS::Array<GS::ObjectState> schedules;
+    CollectSchedules (rootItem, GS::Array<GS::UniString> (), schedules);
+
+    GS::ObjectState response;
+    const auto& scheduleList = response.AddList<GS::ObjectState> ("schedules");
+    for (const GS::ObjectState& scheduleOS : schedules) {
+        scheduleList (scheduleOS);
+    }
+    return response;
+}
+
 // ─── GetNavigatorParentItems ──────────────────────────────────────────────────
 
 GetNavigatorParentItemsCommand::GetNavigatorParentItemsCommand () :
@@ -4747,14 +5136,7 @@ GS::Optional<GS::UniString> GetNavigatorParentItemsCommand::GetRawResponseSchema
                     "type": "object",
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "navigatorItemId": { "$ref": "#/NavigatorItemId" },
-                                "type":            { "$ref": "#/NavigatorItemType" },
-                                "name":            { "type": "string", "description": "The name of the parent navigator item." }
-                            },
-                            "additionalProperties": false,
-                            "required": ["navigatorItemId", "type", "name"]
+                            "$ref": "#/NavigatorParentItem"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -5065,50 +5447,7 @@ GS::Optional<GS::UniString> GetAddOnViewpointsCommand::GetRawResponseSchema () c
                     "type": "object",
                     "oneOf": [
                         {
-                            "type": "object",
-                            "properties": {
-                                "viewpointId": {
-                                    "type": "object",
-                                    "description": "The identifier of the add-on viewpoint item.",
-                                    "properties": {
-                                        "guid": { "$ref": "#/Guid" }
-                                    },
-                                    "additionalProperties": false,
-                                    "required": ["guid"]
-                                },
-                                "parentViewpointId": {
-                                    "type": "object",
-                                    "description": "The identifier of the root or group the item is in. Missing when Archicad reports no parent, as for a root.",
-                                    "properties": {
-                                        "guid": { "$ref": "#/Guid" }
-                                    },
-                                    "additionalProperties": false,
-                                    "required": ["guid"]
-                                },
-                                "itemType": {
-                                    "type": "string",
-                                    "description": "Whether the item is a root, a group or a leaf node.",
-                                    "enum": ["Root", "Group", "Leaf", "Undefined"]
-                                },
-                                "displayId": {
-                                    "type": "string",
-                                    "description": "The ID shown for the item in the Project Map."
-                                },
-                                "displayName": {
-                                    "type": "string",
-                                    "description": "The name shown for the item in the Project Map."
-                                },
-                                "viewSettingsFlags": {
-                                    "type": "integer",
-                                    "description": "The view settings flags of the item, as Archicad stores them (a bit field)."
-                                },
-                                "data": {
-                                    "type": "string",
-                                    "description": "The data the add-on attached to the item, base64 encoded. Empty when there is none."
-                                }
-                            },
-                            "additionalProperties": false,
-                            "required": ["viewpointId", "itemType", "displayId", "displayName", "viewSettingsFlags", "data"]
+                            "$ref": "#/AddOnViewpointDetails"
                         },
                         {
                             "$ref": "#/ErrorItem"
@@ -5316,9 +5655,7 @@ GS::Optional<GS::UniString> CreateAddOnViewpointsCommand::GetInputParametersSche
                     "type": "object",
                     "properties": {
                         "itemType": {
-                            "type": "string",
-                            "description": "Whether to create a root, a group or a leaf node. Roots and groups can't be created in a Teamwork project.",
-                            "enum": ["Root", "Group", "Leaf"]
+                            "$ref": "#/AddOnViewpointType"
                         },
                         "parentViewpointId": {
                             "type": "object",
@@ -5470,38 +5807,7 @@ GS::Optional<GS::UniString> ChangeAddOnViewpointsCommand::GetInputParametersSche
                 "type": "array",
                 "description": "The add-on viewpoint items to change. Only the given fields are changed.",
                 "items": {
-                    "type": "object",
-                    "properties": {
-                        "viewpointId": {
-                            "type": "object",
-                            "description": "The identifier of the add-on viewpoint item to change.",
-                            "properties": {
-                                "guid": { "$ref": "#/Guid" }
-                            },
-                            "additionalProperties": false,
-                            "required": ["guid"]
-                        },
-                        "displayId": {
-                            "type": "string",
-                            "description": "The ID shown for the item in the Project Map."
-                        },
-                        "displayName": {
-                            "type": "string",
-                            "description": "The name shown for the item in the Project Map."
-                        },
-                        "viewSettingsFlags": {
-                            "type": "integer",
-                            "description": "The view settings flags of the item, as Archicad stores them (a bit field).",
-                            "minimum": 0,
-                            "maximum": 4294967295
-                        },
-                        "data": {
-                            "type": "string",
-                            "description": "Data to attach to the item, base64 encoded. It replaces the attached data; an empty string removes it."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "required": ["viewpointId"]
+                    "$ref": "#/AddOnViewpointModificationData"
                 }
             }
         },

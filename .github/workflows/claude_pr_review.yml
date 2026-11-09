@@ -72,11 +72,11 @@ name: Claude PR Review
 # Pull requests opened by the issue bot (claude_issue_triage.yml) are reviewed
 # too, through workflow_dispatch: the bot pushes with GITHUB_TOKEN, which starts
 # no pull_request_target run, so claude_bot_pr_steward.yml dispatches this
-# workflow for them. The steward pushes a merge of main with its GitHub App
-# token, which does start one; that run is skipped (a bot's push to a bot pull
-# request), since the steward dispatches the review once the builds of the new
-# head are green. A person's push to such a pull request is still reviewed
-# here. For those pull requests the review ends with a verdict for
+# workflow for them. A push by another bot to such a pull request (one whose
+# token does start a run) is skipped here too, since the steward dispatches
+# the review once the builds of the new head are green. A person's push to
+# such a pull request (an Update branch the steward asked for) is still
+# reviewed here. For those pull requests the review ends with a verdict for
 # the reviewed commit, which the `verdict` job records as the commit status
 # `claude-review` (success = nothing blocking, failure = something to fix).
 # claude_bot_pr_steward.yml acts on a failure; claude_auto_merge.yml requires a
@@ -113,10 +113,13 @@ jobs:
     # conversation comments and dispatches the payload does not say, so the
     # first step checks). Comments by bots never start a review, so the bot
     # cannot re-review itself in a loop. A person's comment on a bot pull
-    # request does - that is how a tester's report reaches the verdict.
+    # request does - that is how a tester's report reaches the verdict. A
+    # community test result (first line `tapir-test:`) does not: it becomes
+    # the archicad-test/AC<version> status instead (archicad_test_status.yml,
+    # #1577), and the review runs again on every new head anyway.
     # Pull requests of the Claude GitHub App (claude[bot]) stay excluded.
-    # A bot's push to the issue bot's pull request (the steward's merge of
-    # main, see the header) starts no review here: the steward starts it.
+    # A bot's push to the issue bot's pull request starts no review here
+    # (see the header): the steward starts it.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' &&
@@ -129,6 +132,7 @@ jobs:
        github.event.issue.pull_request &&
        github.event.issue.state == 'open' &&
        github.event.comment.user.type != 'Bot' &&
+       !startsWith(github.event.comment.body, 'tapir-test:') &&
        github.event.issue.user.login != 'claude[bot]') ||
       (github.event_name == 'pull_request_review_comment' &&
        github.event.pull_request.draft == false &&
@@ -408,6 +412,19 @@ jobs:
             5. Schema honesty. If a command can answer with a per item error,
                its response schema has to allow that - the *OrErrors unions in
                CommonSchemaDefinitions.json exist for this.
+
+            6. A check file. A command that is added, or whose behaviour
+               changes, needs a check in archicad-addon/Test/checks/ (JSON the
+               community test runner sends to an empty Archicad project on a
+               tester's machine; format in tools/community-test-runner/README.md,
+               "Writing checks"). Without one, nothing ever runs the change in
+               Archicad before it is merged. A missing check is a finding; on a
+               pull request opened by the issue bot it is blocking. Also flag a
+               check whose expectations could not catch the bug it is for, one
+               still holding the starter's "_todo" note or placeholder ids
+               (00000000-...) where a real element or attribute is meant, or
+               one that calls a command neither main nor the pull request
+               provides.
 
             Post inline comments on the specific lines, and exactly one summary
             comment, written once when the review is finished. Do not post a

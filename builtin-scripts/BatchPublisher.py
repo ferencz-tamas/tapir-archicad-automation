@@ -3,6 +3,11 @@
 # dependencies = []
 # ///
 
+# /// tapir
+# category = "batch-automation"
+# changes = "model"
+# ///
+
 """
 Batch Publisher
 

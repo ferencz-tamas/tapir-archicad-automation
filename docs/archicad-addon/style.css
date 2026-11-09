@@ -1,56 +1,29 @@
 @charset "UTF-8";
 
-*,
-*::before,
-*::after {
-    box-sizing: border-box;
-}
-
-* {
-    margin: 0;
-}
+/* The command reference's own layout on top of ../assets/site.css, which gives it the site's
+   fonts, colours (light, and dark under prefers-color-scheme: dark or the header's toggle), header,
+   page head, links, code, headings (.sec-head.ref and .ref-sub) and footer. Everything here uses
+   site.css's tokens (--fg, --muted, --surface, --line, --link, --badge, --mono), and the sidebar
+   is drawn like the coverage pages' one. The page's code blocks get site.js's copy button, the
+   examples and the JSON to send too: it watches for the code blocks renderer.js adds when a
+   command is opened. */
 
 :root {
-    color-scheme: light dark;
-    --text-color: light-dark(#141414, #dddddd);
-    --background: light-dark(#fafafa, #18191b);
-    --gray-10: light-dark(#ececec, #3f444a);
-    --gray-30: light-dark(#dddddd, #51565d);
-    --gray-70: light-dark(#5d5d5d, #6d747d);
+    /* The one name json-schema-view-js.min.css uses, mapped onto the site's palette. */
+    --gray-70: var(--muted);
+    /* The highlight.js token colours in the code blocks (GitHub's dark theme, see below). */
+    --code-keyword: #ff7b72; --code-title: #d2a8ff; --code-attr: #79c0ff; --code-string: #a5d6ff;
+    --code-builtin: #ffa657; --code-comment: #8b949e; --code-name: #7ee787;
+    /* The shadow of the Groups sheet on phones. */
+    --shadow-sheet: 0 -6px 24px rgba(0, 0, 0, 0.3);
 }
 
-html,
-body {
-    color: var(--text-color);
-    background: var(--background);
-    font-size: 16px;
-    font-family: Arial, Helvetica, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    scroll-behavior: smooth;
-    margin: 0px;
-    padding: 0px;
+/* The toolbar and the sidebar stick to the top of the window, so the site header scrolls away. */
+.site-header {
+    position: static;
 }
 
-p {
-    line-height: 1.5em;
-}
-
-div.header {
-    box-shadow: 0px 0px 10px var(--gray-30);
-    margin-bottom: 30px;
-}
-
-div.header_frame {
-    padding: 25px;
-    max-width: 1188px;
-    margin: 0px auto;
-}
-
-div.frame {
-    padding: 0px 20px;
-}
-
-/* A sidebar of sections next to the content on wide screens. */
+/* A sidebar of groups next to the content on wide screens. */
 div.layout {
     display: grid;
     grid-template-columns: 220px minmax(0, 920px);
@@ -59,10 +32,54 @@ div.layout {
     padding: 0 20px 0 0;
 }
 
-div.layout div.frame {
+main.frame {
     width: auto;
+    max-width: none;
+    min-width: 0;
     margin: 0;
+    padding: 36px 20px 0;
 }
+
+section.intro {
+    margin: 0 0 32px;
+}
+
+main.frame p {
+    margin: 0 0 14px;
+    max-width: var(--text-width);
+}
+
+main.frame p.command_example_description {
+    margin: 0.3em 0;
+}
+
+div.call_examples {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+}
+
+div.call_example h3 {
+    font-size: 15px;
+    color: var(--fg);
+    margin: 8px 0 8px;
+}
+
+div.call_example h3 code {
+    font-size: 0.9em;
+}
+
+#commands [hidden],
+#sidebar [hidden] {
+    display: none !important;
+}
+
+#commands {
+    /* Nothing in the list may make the page scroll sideways; wide tables and code scroll in place. */
+    overflow-x: clip;
+}
+
+/* ---- Sidebar ---- */
 
 nav.sidebar {
     position: sticky;
@@ -70,24 +87,26 @@ nav.sidebar {
     align-self: start;
     max-height: 100vh;
     overflow-y: auto;
-    padding: 0.6em 0.5em 2em 20px;
-    font-size: 0.9em;
+    padding: 36px 8px 32px 16px;
+    font-size: 14px;
+    border-right: 1px solid var(--line);
 }
 
 div.sidebar_title {
-    color: var(--gray-70);
-    font-size: 0.8em;
+    font: 700 12px/1.2 var(--mono);
+    letter-spacing: .14em;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin: 1.2em 0 0.4em;
+    color: var(--link);
+    margin: 18px 0 6px;
 }
 
 div.sidebar_title:first-child {
-    margin-top: 0.4em;
+    margin-top: 0;
 }
 
 ul.sidebar_list {
     list-style: none;
+    margin: 0;
     padding: 0;
 }
 
@@ -95,20 +114,21 @@ a.sidebar_link {
     display: flex;
     justify-content: space-between;
     gap: 0.5em;
-    padding: 0.25em 0.5em;
-    border-radius: 5px;
-    color: inherit;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: var(--fg);
     text-decoration: none;
 }
 
 a.sidebar_link:hover {
-    background: var(--gray-10);
+    background: var(--badge);
+    color: var(--fg);
 }
 
 a.sidebar_link[aria-current] {
-    background: var(--gray-10);
-    font-weight: bold;
-    box-shadow: inset 2px 0 0 var(--text-color);
+    background: var(--badge);
+    font-weight: 700;
+    box-shadow: inset 2px 0 0 var(--link);
 }
 
 a.sidebar_link.sidebar_empty {
@@ -116,7 +136,7 @@ a.sidebar_link.sidebar_empty {
 }
 
 span.sidebar_count {
-    color: var(--gray-70);
+    color: var(--muted);
     font-variant-numeric: tabular-nums;
 }
 
@@ -126,80 +146,72 @@ div.sidebar_versions {
     gap: 0.3em;
 }
 
-button.sidebar_version {
-    font: inherit;
-    font-size: 0.9em;
-    color: inherit;
-    background: var(--background);
-    border: 1px solid var(--gray-30);
-    border-radius: 5px;
-    padding: 0.2em 0.5em;
+button.sidebar_version,
+button.chip {
+    font: 600 13px var(--body);
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 2px 10px;
     cursor: pointer;
+    white-space: nowrap;
 }
 
-button.sidebar_version[aria-pressed="true"] {
-    background: var(--gray-10);
-    border-color: var(--text-color);
+button.sidebar_version:hover,
+button.chip:hover {
+    background: var(--badge);
+}
+
+button.sidebar_version[aria-pressed="true"],
+button.chip[aria-pressed="true"] {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
 }
 
 button.toolbar_sections {
     display: none;
 }
 
-div.title {
-    font-size: 1.6em;
-}
-
-details.command_container {
-    margin: 1.0em 0;
-    border: 1px solid var(--gray-30);
-    border-radius: 5px;
-}
-
-details ::marker {
-    color: var(--gray-70);
-}
-
-div.group_name {
-    font-size: 1.4em;
-    margin-top: 2.0em;
-}
-
-section.group,
-details.command_container {
-    /* Keep the target clear of the sticky toolbar when jumping to it;
-       renderer.js sets --toolbar-height from the toolbar's real height. */
-    scroll-margin-top: calc(var(--toolbar-height, 4em) + 0.5em);
-}
-
-span.group_count {
-    color: var(--gray-70);
-    font-size: 0.6em;
-    margin-left: 0.6em;
-}
+/* ---- Toolbar: search, buttons, chips and the "Showing" line ---- */
 
 div.toolbar {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    padding: 0.7em 0 0.55em;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+}
+
+div.toolbar_row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5em;
-    padding: 0.6em 0;
-    background: var(--background);
-    border-bottom: 1px solid var(--gray-30);
 }
 
-div.toolbar input,
-div.toolbar button {
+div.toolbar_row input,
+div.toolbar_row button {
     font: inherit;
     font-size: 0.9em;
-    color: inherit;
-    background: var(--background);
-    border: 1px solid var(--gray-30);
-    border-radius: 5px;
-    padding: 0.35em 0.6em;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 0.4em 0.7em;
+}
+
+div.toolbar input::placeholder {
+    color: var(--muted);
+}
+
+div.toolbar input:focus {
+    border-color: var(--link);
 }
 
 input.toolbar_search {
@@ -209,114 +221,382 @@ input.toolbar_search {
 
 button.toolbar_button {
     cursor: pointer;
+    font-weight: 600;
 }
 
 button.toolbar_button:hover {
-    background: var(--gray-10);
+    background: var(--badge);
+    border-color: var(--link);
 }
 
-span.toolbar_status {
-    color: var(--gray-70);
-    font-size: 0.9em;
+div.chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3em;
 }
 
-div.overview {
-    margin: 1.5em 0 0;
+span.chips_label {
+    font: 700 11px/1.2 var(--mono);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--link);
+    min-width: 5.5em;
 }
 
-div.overview_title {
-    font-weight: bold;
-    margin-bottom: 0.5em;
-}
-
-table.overview_table {
-    border-collapse: collapse;
-    width: 100%;
-}
-
-table.overview_table th,
-table.overview_table td {
-    text-align: left;
-    padding: 0.3em 0.6em;
-    border-bottom: 1px solid var(--gray-10);
-}
-
-table.overview_table th {
-    color: var(--gray-70);
-    font-weight: normal;
+div.toolbar_status {
+    color: var(--muted);
     font-size: 0.85em;
 }
 
-table.overview_table .number {
-    text-align: right;
-    white-space: nowrap;
+a.toolbar_clear {
+    margin-left: 0.8em;
+    font-weight: 600;
 }
 
-table.overview_table a {
-    color: inherit;
+/* ---- Groups ---- */
+
+section.group {
+    margin: 0;
+    border-bottom: 1px solid var(--line);
+}
+
+section.group,
+details.command_container {
+    /* Keep the target clear of the sticky toolbar when jumping to it;
+       renderer.js sets --toolbar-height from the toolbar's real height. */
+    scroll-margin-top: calc(var(--toolbar-height, 8em) + 0.5em);
+}
+
+h3.group_heading {
+    margin: 0;
+    font: inherit;
+}
+
+button.group_toggle {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6em;
+    width: 100%;
+    min-width: 0;
+    padding: 0.7em 0.5em;
+    font: inherit;
+    text-align: left;
+    color: var(--fg);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+}
+
+button.group_toggle:hover {
+    background: var(--badge);
+}
+
+button.group_toggle::before {
+    content: "▸";
+    color: var(--muted);
+    flex: none;
+    width: 0.8em;
+    transition: transform 0.15s;
+}
+
+button.group_toggle[aria-expanded="true"]::before {
+    transform: rotate(90deg);
+}
+
+span.group_name {
+    flex: none;
+    font: 700 19px/1.2 var(--display);
+}
+
+span.group_count {
+    flex: none;
+    color: var(--muted);
+    font-size: 0.85em;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+span.group_preview {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--muted);
+    font: 400 12.5px var(--mono);
+}
+
+section.group_open span.group_preview {
+    visibility: hidden;
+}
+
+div.group_body {
+    padding: 0 0 0.9em;
+}
+
+h4.group_action_title {
+    font: 700 11px/1.2 var(--mono);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--link);
+    margin: 0.9em 0 0.35em;
+}
+
+div.group_list {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+
+/* ---- One command: one line, opened in place ---- */
+
+details.command_container {
+    border-bottom: 1px solid var(--line);
+}
+
+details.command_container:last-child {
+    border-bottom: 0;
+}
+
+details.command_container[open] {
+    box-shadow: inset 3px 0 0 var(--ochre);
 }
 
 summary.command_header {
-    padding: 0.5em 0.6em;
-    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    min-height: 36px;
+    padding: 0 0.75em;
     cursor: pointer;
-    transition: background 0.1s;
-
-    &:hover {
-        background: var(--gray-30);
-    }
+    list-style: none;
 }
 
-details[open] summary.command_header {
-    background: var(--gray-10);
-    border-bottom-right-radius: 0px;
-    border-bottom-left-radius: 0px;
-}
-
-details summary.command_header:hover {
-    background: var(--gray-30);
-}
-
-span.command_name {
-    display: inline-block;
-    word-break: break-word;
-}
-
-span.command_summary {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
-    /* Muted on every header background, hovered or not. */
-    opacity: 0.75;
-    font-size: 0.85em;
-    line-height: 1.4em;
-    margin-top: 0.2em;
-    /* Line up with the name, after the disclosure marker. */
-    padding-left: 1.1em;
-}
-
-details[open] span.command_summary {
-    /* The full description is in the opened content. */
+summary.command_header::-webkit-details-marker {
     display: none;
 }
 
+summary.command_header::before {
+    content: "▸";
+    color: var(--muted);
+    flex: none;
+    font-size: 0.8em;
+    transition: transform 0.15s;
+}
+
+details[open] > summary.command_header::before {
+    transform: rotate(90deg);
+}
+
+summary.command_header:hover,
+details[open] > summary.command_header {
+    background: var(--badge);
+}
+
+span.command_name {
+    flex: none;
+    max-width: 60%;
+    overflow-wrap: anywhere;
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--fg);
+}
+
+a.command_link {
+    flex: none;
+    display: inline-flex;
+    padding: 2px;
+    color: var(--muted);
+    border-radius: 3px;
+    opacity: 0;
+}
+
+summary.command_header:hover a.command_link,
+details[open] a.command_link,
+a.command_link:focus-visible,
+a.command_link.copied {
+    opacity: 1;
+}
+
+a.command_link:hover,
+a.command_link.copied {
+    color: var(--link);
+}
+
+span.command_summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--muted);
+    font-size: 0.87em;
+}
+
 span.command_version {
-    color: #aaaaaa;
-    font-size: 0.6em;
-    margin-left: 0.6em;
-    display: inline-block;
+    flex: none;
+    margin-left: auto;
+    color: var(--link);
+    font-size: 0.75em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
 
 div.command_content {
-    padding-left: 1.0em;
-    margin: 1.0em 0.5em;
+    padding: 0.4em 1em 1em;
+    color: var(--fg);
+    border-top: 1px solid var(--line);
+}
+
+div.command_description {
+    margin: 0.6em 0 0.2em;
+    max-width: var(--text-width);
+}
+
+h4.command_section_title {
+    font: 700 11px/1.2 var(--mono);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--link);
+    margin: 1.4em 0 0.5em;
+}
+
+div.command_example_body pre,
+div.command_content > pre {
+    margin: 0.5em 0;
+}
+
+p.command_example_description {
+    margin: 0.3em 0;
+}
+
+div.command_example_status {
+    color: var(--muted);
+    font-style: italic;
+}
+
+div.command_example_file {
+    font-size: 0.82em;
+    color: var(--muted);
+}
+
+div.command_example_file a {
+    font-family: var(--mono);
+    word-break: break-all;
+}
+
+div.command_json_title {
+    margin-top: 0.9em;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+p.command_returns_line {
+    margin: 0.4em 0;
+    color: var(--muted);
+}
+
+/* ---- Parameter tables ---- */
+
+div.params_wrapper {
+    overflow-x: auto;
+}
+
+table.params {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.87em;
+}
+
+table.params th,
+table.params td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.35em 0.6em;
+    border-bottom: 1px solid var(--line);
+}
+
+table.params th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.9em;
+    white-space: nowrap;
+}
+
+table.params td.params_name {
+    overflow-wrap: anywhere;
+    min-width: 8em;
+}
+
+table.params td.params_name code {
+    font-size: 0.95em;
+    background: none;
+    padding: 0;
+}
+
+span.params_option {
+    color: var(--muted);
+    font-style: italic;
+}
+
+table.params td.params_type {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    min-width: 7em;
+}
+
+table.params .params_required {
+    text-align: center;
+    color: var(--link);
+    font-weight: 700;
+}
+
+table.params td.params_description {
+    min-width: 14em;
+    white-space: pre-line;
+}
+
+button.params_ref {
+    font: inherit;
+    text-align: left;
+    color: var(--link);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+button.params_ref::before {
+    content: "▸ ";
+}
+
+button.params_ref[aria-expanded="true"]::before {
+    content: "▾ ";
+}
+
+/* ---- Raw schema and related commands ---- */
+
+details.command_raw {
+    margin-top: 1.2em;
+}
+
+details.command_raw > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--muted);
+    width: fit-content;
 }
 
 div.scheme_title {
-    font-weight: bold;
-    margin-top: 1.0em;
+    font-weight: 700;
+    color: var(--fg);
+    margin-top: 1.2em;
     margin-bottom: 0.5em;
 }
 
@@ -328,85 +608,84 @@ div.scheme_container .description {
     white-space: pre-line;
 }
 
-code.language-python.hljs {
-    background: transparent;
-    border: 1px dotted var(--gray-30);
-    color: inherit;
+.json-schema-view,
+json-schema-view {
+    font-family: var(--mono);
 }
 
-details.command_example {
-    margin-top: 1.0em;
+.json-schema-view>*,
+json-schema-view>* {
+    font-size: 13px;
 }
 
-details.command_example > summary {
-    cursor: pointer;
-    font-weight: bold;
-    width: fit-content;
+.json-schema-view .description,
+json-schema-view .description {
+    color: var(--muted);
 }
 
-div.command_example_body {
-    margin-top: 0.5em;
+div.command_related {
+    margin-top: 1em;
+    font-size: 0.9em;
 }
 
-div.command_example_body pre {
-    overflow-x: auto;
-    margin: 0.5em 0;
+div.command_related a {
+    font-family: var(--mono);
 }
 
-div.command_example_body code.hljs {
+span.command_related_label {
+    font-weight: 600;
+}
+
+/* Code highlighted by highlight.js sits in the site's code blocks, which are charcoal with cream text
+   in both themes. github.min.css is a light theme, so the tokens get GitHub's dark colours instead. */
+pre code.hljs {
     display: block;
-    padding: 0.8em;
-    font-size: 0.85em;
-    line-height: 1.4em;
+    padding: 0;
+    background: transparent;
+    color: var(--pre-text);
+    overflow-x: visible;
 }
 
-p.command_example_description {
-    margin: 0.3em 0;
-}
+pre .hljs-doctag, pre .hljs-keyword, pre .hljs-meta .hljs-keyword, pre .hljs-template-tag,
+pre .hljs-template-variable, pre .hljs-type, pre .hljs-variable.language_ { color: var(--code-keyword); }
+pre .hljs-title, pre .hljs-title.class_, pre .hljs-title.class_.inherited__, pre .hljs-title.function_ { color: var(--code-title); }
+pre .hljs-attr, pre .hljs-attribute, pre .hljs-literal, pre .hljs-meta, pre .hljs-number, pre .hljs-operator,
+pre .hljs-selector-attr, pre .hljs-selector-class, pre .hljs-selector-id, pre .hljs-variable { color: var(--code-attr); }
+pre .hljs-meta .hljs-string, pre .hljs-regexp, pre .hljs-string { color: var(--code-string); }
+pre .hljs-built_in, pre .hljs-symbol { color: var(--code-builtin); }
+pre .hljs-code, pre .hljs-comment, pre .hljs-formula { color: var(--code-comment); }
+pre .hljs-name, pre .hljs-quote, pre .hljs-selector-pseudo, pre .hljs-selector-tag { color: var(--code-name); }
+pre .hljs-subst { color: var(--pre-text); }
 
-div.command_example_status {
-    color: var(--gray-70);
-    font-style: italic;
-}
-
-div.command_example_link {
-    font-size: 0.85em;
-    text-align: right;
-}
-
-.hljs-meta .hljs-string,
-.hljs-regexp,
-.hljs-string {
-    /* override for github highlighter */
-    color: var(--schema-blue) !important;
-}
-
-/* Below this width the sidebar is a drawer opened by "Sections". */
-@media only screen and (max-width: 1150px) {
+/* Below this width the sidebar is a sheet opened by "Groups", and each row of chips scrolls
+   sideways on its own. */
+@media only screen and (max-width: 900px) {
 
     div.layout {
         display: block;
         padding: 0;
     }
 
-    div.layout div.frame {
+    main.frame {
         margin: 0 auto;
         max-width: 920px;
     }
 
     nav.sidebar {
         position: fixed;
-        z-index: 3;
-        top: 0;
-        bottom: 0;
+        z-index: 60;
         left: 0;
-        width: min(300px, 85vw);
-        max-height: none;
-        /* align-self: start from the wide layout would shrink the drawer to its content. */
-        align-self: stretch;
-        background: var(--background);
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-        transform: translateX(-105%);
+        right: 0;
+        bottom: 0;
+        top: auto;
+        max-height: 75vh;
+        padding: 1em 16px 24px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px 12px 0 0;
+        box-shadow: var(--shadow-sheet);
+        overscroll-behavior: contain;
+        transform: translateY(105%);
         visibility: hidden;
         transition: transform 0.2s, visibility 0.2s;
     }
@@ -420,36 +699,83 @@ div.command_example_link {
         display: inline-block;
     }
 
+    div.chips {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        /* The chips scroll; the page does not. */
+        overscroll-behavior-x: contain;
+    }
+
+    div.chips::-webkit-scrollbar {
+        display: none;
+    }
+
+    span.chips_label {
+        flex: none;
+        min-width: 0;
+    }
+
+    button.chip {
+        flex: none;
+    }
+
 }
 
 @media only screen and (max-width: 640px) {
 
-    div.toolbar button {
+    main.frame {
+        padding: 24px 16px 0;
+    }
+
+    /* Only the first row stays pinned on a phone: Groups, Expand all and Collapse all on one
+       line and the search under them. The chips and the "Showing" line scroll away with the
+       list, so the pinned part keeps to about a tenth of the screen. */
+    div.toolbar {
+        display: contents;
+    }
+
+    div.toolbar > div.toolbar_row:first-child {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 0.6em 0 0.5em;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line);
+    }
+
+    div.toolbar > :not(:first-child) {
+        margin-top: 0.45em;
+    }
+
+    div.toolbar > div.toolbar_status {
+        padding-bottom: 0.55em;
+        border-bottom: 1px solid var(--line);
+    }
+
+    div.toolbar_row button {
         flex: 1 1 auto;
+    }
+
+    input.toolbar_search {
+        flex-basis: 100%;
+        order: 1;
+    }
+
+    span.group_preview {
+        display: none;
+    }
+
+    div.command_content {
+        padding: 0.4em 0.6em 1em;
+    }
+
+    a.command_link {
+        opacity: 1;
     }
 
 }
 
-.footer {
-    margin: 40px auto 0;
-    padding: 0 20px;
-    max-width: 920px;
-
-    hr {
-        border-width: 0.5px;
-        color: var(--gray-30);
-    }
-
-    a.icon {
-        display: block;
-        max-width: 28px;
-        margin: 20px auto;
-        fill: light-dark(black, var(--gray-30));
-
-        svg {
-            display: block;
-            max-width: 100%;
-            width: 100%;
-        }
-    }
+.site-footer {
+    margin-top: 48px;
 }

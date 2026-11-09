@@ -3,6 +3,11 @@
 # dependencies = []
 # ///
 
+# /// tapir
+# category = "element-data-properties"
+# changes = "read-only"
+# ///
+
 """
 Property Highlighter
 
